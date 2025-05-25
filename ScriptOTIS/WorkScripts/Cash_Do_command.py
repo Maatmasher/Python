@@ -1,17 +1,25 @@
 import asyncio
+
+# import subprocess
 from datetime import datetime
 import os
 import aiofiles
 
-# Конфигурация
+# ========= КОНФИГУРАЦИЯ =========
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 HOSTS_FILE = os.path.join(CURRENT_DIR, "ip_list.txt")  # Список хостов
-LOG_FILE = os.path.join(CURRENT_DIR, "combined.log")  # Единый лог-файл
+
+LOG_FILE = os.path.join(CURRENT_DIR, "combined_command.log")  # Единый лог-файл
+
 COMMAND_FILE = os.path.join(CURRENT_DIR, "command.txt")
+
 MAX_CONCURRENT_TASKS = 10  # Максимальное количество одновременных задач
+
 PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_txt}"
 USER = "tc"
-PASSWORD = "JnbcHekbn123"  # Лучше использовать SSH-ключи!
+PASSWORD = "JnbcHekbn123"
+# ================================
 
 
 def setup_logging():

@@ -91,9 +91,9 @@ def collect_cash_data(server_ips):
             print(f" Данные с {server_ip} успешно собраны")
 
         except OperationalError as e:
-            print(f" Ошибка подключения к {server_ip}: {str(e)}", file=sys.stderr)
+            print(f"Ошибка подключения к {server_ip}: {str(e)}", file=sys.stderr)
         except Exception as e:
-            print(f" Ошибка при работе с {server_ip}: {str(e)}", file=sys.stderr)
+            print(f"Ошибка при работе с {server_ip}: {str(e)}", file=sys.stderr)
 
     return cash_dict
 
@@ -105,7 +105,7 @@ def save_results(data, filename):
             json.dump(data, f, indent=4, ensure_ascii=False)
         return True
     except IOError as e:
-        print(f" Ошибка записи в файл: {str(e)}", file=sys.stderr)
+        print(f"Ошибка записи в файл: {str(e)}", file=sys.stderr)
         return False
 
 
@@ -118,10 +118,10 @@ def main():
     server_ips = get_server_ips(MAIN_SERVERS)
 
     if not server_ips:
-        print(" Не удалось получить список серверов", file=sys.stderr)
+        print("Не удалось получить список серверов", file=sys.stderr)
         return
 
-    print(f" Всего найдено серверов: {len(server_ips)}")
+    print(f"Всего найдено серверов: {len(server_ips)}")
 
     # Этап 2: Сбор данных по кассам
     print("\n[2/3] Сбор данных по кассам...")
@@ -134,8 +134,8 @@ def main():
     # Этап 3: Сохранение результатов
     print("\n[3/3] Сохранение результатов...")
     if save_results(cash_data, OUTPUT_FILE):
-        print(f" Данные успешно сохранены в {OUTPUT_FILE}")
-        print(f" Всего собрано касс: {len(cash_data)}")
+        print(f"Данные успешно сохранены в {OUTPUT_FILE}")
+        print(f"Всего собрано касс: {len(cash_data)}")
     else:
         print("Не удалось сохранить результаты", file=sys.stderr)
 
