@@ -1,32 +1,35 @@
+#!/usr/bin/env python3
 import asyncio
-
-# import subprocess
+import csv
 from datetime import datetime
 import os
 import aiofiles
 
 # ========= КОНФИГУРАЦИЯ =========
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
 HOSTS_FILE = os.path.join(CURRENT_DIR, "ip_list.txt")  # Список хостов
-
 LOG_FILE = os.path.join(CURRENT_DIR, "combined_command.log")  # Единый лог-файл
-
+PING_RESULTS_FILE = os.path.join(
+    CURRENT_DIR, "ping_results.csv"
+)  # Файл с результатами ping
 COMMAND_FILE = os.path.join(CURRENT_DIR, "command.txt")
-
 MAX_CONCURRENT_TASKS = 10  # Максимальное количество одновременных задач
-
 PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_txt}"
 USER = "tc"
 PASSWORD = "JnbcHekbn123"
 # ================================
 
 
-def setup_logging():
-    """Создаем лог-файл"""
+def setup_files():
+    """Создаем лог-файлы и CSV с заголовками"""
     os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write("")  # Очищаем файл при запуске
+
+    # Создаем CSV файл с заголовками
+    with open(PING_RESULTS_FILE, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["IP", "Ping Status", "Timestamp"])
 
 
 async def log_message(message):
@@ -38,8 +41,16 @@ async def log_message(message):
         await f.write(log_entry)
 
 
+async def record_ping_result(ip, status):
+    """Записываем результат ping в CSV файл"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(PING_RESULTS_FILE, "a", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([ip, status, timestamp])
+
+
 async def check_ping(host):
-    """Асинхронная проверка ping"""
+    """Асинхронная проверка ping с записью результата в CSV"""
     try:
         proc = await asyncio.create_subprocess_exec(
             "ping",
@@ -54,13 +65,16 @@ async def check_ping(host):
         stdout, stderr = await proc.communicate()
 
         if "TTL=" in stdout.decode():
-            await log_message(f"{host}  Ping успешен")
+            status = "Success"
+            await record_ping_result(host, status)
             return True
         else:
-            await log_message(f"{host}  Ping не прошел")
+            status = "Failed"
+            await record_ping_result(host, status)
             return False
     except Exception as e:
-        await log_message(f"{host}  Ошибка ping: {str(e)}")
+        status = f"Error: {str(e)}"
+        await record_ping_result(host, status)
         return False
 
 
@@ -96,14 +110,15 @@ async def process_host(host, remaining_counter):
     remaining = remaining_counter["total"] - remaining_counter["processed"]
     await log_message(f"Обработка {host} | Осталось хостов: {remaining}")
 
-    if await check_ping(host):
+    ping_success = await check_ping(host)
+    if ping_success:
         await run_plink(host)
 
     remaining_counter["processed"] += 1
 
 
 async def main():
-    setup_logging()
+    setup_files()
 
     # Чтение хостов
     async with aiofiles.open(HOSTS_FILE, "r") as f:

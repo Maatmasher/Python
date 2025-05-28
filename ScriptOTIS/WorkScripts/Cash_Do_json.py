@@ -10,7 +10,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 CASH_IP_FILE = os.path.join(CURRENT_DIR, "cash_ip_all.json")  # Файл с IP касс
 LOG_FILE = os.path.join(CURRENT_DIR, "combined.log")  # Единый лог-файл
 COMMAND_TEMPLATE = "command_{type}.txt"  # Шаблон файла команд
-MAX_CONCURRENT_TASKS = 10  # Максимальное количество одновременных выполняемых действий
+MAX_CONCURRENT_TASKS = 15  # Максимальное количество одновременных выполняемых действий
 PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_file}"
 USER = "tc"
 PASSWORD = "JnbcHekbn123"  # Придумать бы чего без хардкода паролей....
@@ -20,7 +20,7 @@ TYPE_COMMANDS = {
     "POS": "command_POS.txt",
     "SCO": "command_SCO.txt",
     "SCO_3": "command_SCO_3.txt",
-    "TOUCH_2": "command_TOUCH_2.txt",
+    "TOUCH": "command_TOUCH.txt",
 }
 
 
