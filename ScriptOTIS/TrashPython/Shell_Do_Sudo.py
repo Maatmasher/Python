@@ -14,22 +14,22 @@ def execute_sudo_commands(host, username, password, commands, sudo_password=None
         shell = ssh.invoke_shell()
         
         # Отправляем команду sudo su -
-        shell.send('sudo su -\n)
+        shell.send('sudo su -\n') # type: ignore
         
         # Ждем приглашения пароля (если требуется)
         time.sleep(1)
         if sudo_password:
-            shell.send(f'{sudo_password}\n')
+            shell.send(f'{sudo_password}\n') # type: ignore
             time.sleep(1)
         
         # Отправляем все команды
         for cmd in commands:
-            shell.send(f'{cmd}\n')
+            shell.send(f'{cmd}\n') # type: ignore
             time.sleep(0.5)  # Даем время на выполнение
         
         # Завершаем сессию
-        shell.send('exit\n')
-        shell.send('exit\n')
+        shell.send('exit\n') # type: ignore
+        shell.send('exit\n') # type: ignore
         time.sleep(1)
         
         # Получаем весь вывод
@@ -42,7 +42,7 @@ def execute_sudo_commands(host, username, password, commands, sudo_password=None
         
         return output
     except Exception as e:
-        log_error(host, commands, str(e))
+        log_result(host, commands, str(e))
         raise
     finally:
         ssh.close()
