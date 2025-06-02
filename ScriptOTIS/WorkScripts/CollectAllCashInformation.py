@@ -21,7 +21,7 @@ CASH_TYPES = {  # Типы кассовых терминалов
     "POS": "t2.cash_type = 'POS'",
     "SCO": "t2.cash_type = 'SCO'",
     "SCO_3": "t2.cash_type = 'SCO_3'",
-    "TOUCH": "t2.cash_type = 'TOUCH_2'" "",
+    "TOUCH": "t2.cash_type = 'TOUCH'" "",
 }
 
 OUTPUT_FILE = "cash_ip_all.json"  # Файл для сохранения результатов
