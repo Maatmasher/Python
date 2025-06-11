@@ -8,7 +8,7 @@ def get_db_connection():
         dbname="set",
         user="postgres",
         password="postgres",
-        host="10.21.11.45",
+        host="10.100.105.9",
         port="5432",
     )
 
@@ -38,7 +38,7 @@ def get_sku_from_db(barcode):
         print(f"Error fetching SKU for barcode {barcode}: {e}")
         return None
     finally:
-        if conn: # type: ignore
+        if conn:  # type: ignore
             conn.close()
 
 
@@ -72,13 +72,12 @@ def convert_v2_to_v3(v2_path, v3_path):
     # Создаем структуру для V3.json
     v3_template = {
         "templateType": "PERMANENT",
-        "templateName": "Пик-лист SCO V3",
-        "templateGuid": 657413,
-        "cashTemplates": [225577],
+        "templateName": "Начальный Пик",
+        "templateGuid": 7720559,
         "menuTemplates": [
             {
-                "menuName": "Пик-Лист 98989",
-                "shopNumbers": [98989],
+                "menuName": "Пик-лист V3 Д-256",
+                "shopNumbers": [145],
                 "cashType": "CSI_K",
                 "dateFrom": "2025-06-02",
                 "content": json.dumps(enhanced_data, ensure_ascii=False),
