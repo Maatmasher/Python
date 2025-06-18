@@ -2,6 +2,7 @@
 import subprocess
 from pathlib import Path
 import logging
+import os
 from typing import Dict, List, Optional
 import time
 
@@ -200,7 +201,8 @@ if __name__ == "__main__":
     try:
         # Инициализация
         configurator = ConfiguratorTool(
-            centrum_host="10.21.11.45", config_dir="/path/to/config"
+            centrum_host="10.21.11.45",
+            config_dir="C:\\Users\\iakushin.n\\Documents\\GitHub\\Python\\updaterJar",
         )
 
         # 1. Получить все узлы с повторами
@@ -209,11 +211,11 @@ if __name__ == "__main__":
         print(all_nodes)
 
         # 2. Обновить кассы (без повторов)
-        cash_update = configurator.update_cash_devices(
-            cash_type="POS", version="10.4.14.14"
-        )
-        print("Результат обновления касс:")
-        print(cash_update)
+        # cash_update = configurator.update_cash_devices(
+        #     cash_type="POS", version="10.4.14.14"
+        # )
+        # print("Результат обновления касс:")
+        # print(cash_update)
 
         # Сохранить результат
         configurator.save_last_result()
