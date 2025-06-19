@@ -219,10 +219,10 @@ if __name__ == "__main__":
         # )
         # print(update_result)
 
-        get_nodes_from_file = configurator.get_nodes_from_file()
-        print("Узлы из файла:")
-        for key, data in get_nodes_from_file.items():
-            print(f"{key}: {data}")
+        # get_nodes_from_file = configurator.get_nodes_from_file()
+        # print("Узлы из файла:")
+        # for key, data in get_nodes_from_file.items():
+        #     print(f"{key}: {data}")
 
         # Сохраняем результат
         configurator.save_last_result()

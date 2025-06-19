@@ -31,7 +31,8 @@ class ConfiguratorTool:
     ) -> Dict[str, Dict[str, Optional[str]]]:
         """Выполняет команду с повторами для недоступных узлов"""
         result_dict: Dict[str, Dict[str, Optional[str]]] = {}
-        unavailable_nodes = set()
+        unavailable_nodes: Set[str] = set()
+        success_nodes: Set[str] = set()
         attempt = 0
 
         while attempt < max_retries:
@@ -54,37 +55,12 @@ class ConfiguratorTool:
                     logging.warning("Пустой вывод от команды")
                     continue
 
-                # Обработка успешного события
-                if "успешно запланировано" in result.stdout:
-                    node_id = self._extract_node_id(result.stdout)
-                    if node_id:
-                        result_dict[node_id] = {
-                            "tp": node_id,
-                            "status": "SUCCESS",
-                            "message": result.stdout.strip(),
-                            "type": None,
-                            "cv": None,
-                            "pv": None,
-                            "online": None,
-                            "ip": None,
-                            "ut": None,
-                            "local patches": None,
-                        }
-                    else:
-                        # Если не удалось извлечь node_id, возвращаем общий успех
-                        return {
-                            "success": {
-                                "status": "SUCCESS",
-                                "message": result.stdout.strip(),
-                            }
-                        }
-
-                    self.node_result = result_dict
-                    return self.node_result
-
-                current_result, current_unavailable = self._parse_output(result.stdout)
+                current_result, current_unavailable, current_success = (
+                    self._parse_output(result.stdout)
+                )
                 result_dict.update(current_result)
                 unavailable_nodes.update(current_unavailable)
+                success_nodes.update(current_success)
 
                 if not current_unavailable or max_retries <= 1:
                     break
@@ -118,30 +94,95 @@ class ConfiguratorTool:
                 "local patches": None,
             }
 
+        # Заполнение успешных узлов
+        for node in success_nodes:
+            if node not in result_dict:
+                result_dict[node] = {
+                    "tp": node,
+                    "status": "SUCCESS",
+                    "message": "успешно запланировано",
+                    "type": None,
+                    "cv": None,
+                    "pv": None,
+                    "online": None,
+                    "ip": None,
+                    "ut": None,
+                    "local patches": None,
+                }
+
         self.node_result = result_dict
         return self.node_result
 
-    def _extract_node_id(self, output: str) -> Optional[str]:
-        """Извлекает ID узла из сообщения об успешном обновлении"""
+    def _extract_node_ids(self, output: str) -> List[str]:
+        """Извлекает все ID узлов из вывода"""
+        node_ids = []
         for line in output.splitlines():
-            if "успешно запланировано" in line:
+            if "успешно запланировано" in line or "недоступен" in line:
                 parts = line.split()
                 for part in parts:
-                    if part.replace(".", "").isdigit():
-                        return part
-        return None
+                    if part.replace(".", "").isdigit() and len(part.split(".")) >= 3:
+                        node_ids.append(part)
+        return node_ids
 
     def _parse_output(
         self, output: str
-    ) -> Tuple[Dict[str, Dict[str, Optional[str]]], Set[str]]:
-        """Парсит вывод команды с улучшенным алгоритмом"""
+    ) -> Tuple[Dict[str, Dict[str, Optional[str]]], Set[str], Set[str]]:
         if not output:
-            return {}, set()
+            return {}, set(), set()
 
         devices_dict: Dict[str, Dict[str, Optional[str]]] = {}
         unavailable_nodes: Set[str] = set()
+        success_nodes: Set[str] = set()
 
         try:
+            # Извлекаем все узлы из сообщения
+            all_node_ids = self._extract_node_ids(output)
+
+            for line in output.splitlines():
+                line = line.strip()
+
+                # Обработка успешных узлов
+                if "успешно запланировано" in line:
+                    for part in line.split():
+                        if (
+                            part.replace(".", "").isdigit()
+                            and len(part.split(".")) >= 3
+                        ):
+                            success_nodes.add(part)
+                            devices_dict[part] = {
+                                "tp": part,
+                                "status": "SUCCESS",
+                                "message": f"Обновление узла {part} успешно запланировано",
+                                "type": None,
+                                "cv": None,
+                                "pv": None,
+                                "online": None,
+                                "ip": None,
+                                "ut": None,
+                                "local patches": None,
+                            }
+
+                # Обработка недоступных узлов
+                elif "недоступен" in line:
+                    for part in line.split():
+                        if (
+                            part.replace(".", "").isdigit()
+                            and len(part.split(".")) >= 3
+                        ):
+                            unavailable_nodes.add(part)
+                            devices_dict[part] = {
+                                "tp": part,
+                                "status": "UNAVAILABLE",
+                                "message": f"Узел {part} недоступен",
+                                "type": None,
+                                "cv": None,
+                                "pv": None,
+                                "online": None,
+                                "ip": None,
+                                "ut": None,
+                                "local patches": None,
+                            }
+
             for line in output.splitlines():
                 line = line.strip()
                 if not line or line.startswith(("Current client version:", "-")):
@@ -187,9 +228,9 @@ class ConfiguratorTool:
 
         except Exception as e:
             logging.error(f"Ошибка при парсинге вывода: {str(e)}")
-            return {}, set()
+            return {}, set(), set()
 
-        return devices_dict, unavailable_nodes
+        return devices_dict, unavailable_nodes, success_nodes
 
     # Функция получить состояние всех узлов с Centrum
     def get_all_nodes(
@@ -259,17 +300,18 @@ class ConfiguratorTool:
 if __name__ == "__main__":
     try:
         configurator = ConfiguratorTool(
-            centrum_host="10.100.105.9",
+            centrum_host="10.9.30.101",
             config_dir="C:\\Users\\iakushin.n\\Documents\\GitHub\\Python\\updaterJar\\",
         )
 
         # Тестирование
         # Получаем все узлы, пишем всё на экран и пишем node_result.json по умолчанию
-        all_nodes = configurator.get_all_nodes(max_retries=1)
-        print("Все узлы:")
-        for key, data in all_nodes.items():
-            print(f"{key}: {data}")
-        configurator.save_node_result()
+        # all_nodes = configurator.get_all_nodes(max_retries=1)
+        # print("Все узлы:")
+        # for key, data in all_nodes.items():
+        #     print(f"{key}: {data}")
+        # configurator.save_node_result()
+
         # Получаем все узлы из файла, пишем всё на экран и пишем результат в server.json
         get_nodes_from_file = configurator.get_nodes_from_file()
         print("Узлы из файла:")
@@ -285,13 +327,13 @@ if __name__ == "__main__":
         configurator.save_node_result(filename="server_update.json")
 
         # Запуск обновления касс, просто выводим результат
-        cash_update = configurator.update_cash_devices(
-            cash_type="POS", version="10.4.14.14"
-        )
-        print("\nРезультат обновления касс:")
-        for key, data in cash_update.items():
-            print(f"{key}: {data}")
-        configurator.save_node_result(filename="server_cash_update.json")
+        # cash_update = configurator.update_cash_devices(
+        #     cash_type="POS", version="10.4.14.14"
+        # )
+        # print("\nРезультат обновления касс:")
+        # for key, data in cash_update.items():
+        #     print(f"{key}: {data}")
+        # configurator.save_node_result(filename="server_cash_update.json")
 
     except Exception as e:
         logging.error(f"Ошибка какая то: {str(e)}")
