@@ -301,16 +301,16 @@ if __name__ == "__main__":
     try:
         configurator = ConfiguratorTool(
             centrum_host="10.9.30.101",
-            config_dir="C:\\Users\\iakushin.n\\Documents\\GitHub\\Python\\updaterJar\\",
+            config_dir="C:\\Users\\iakushin.n\\Documents\\GitHub\\Python\\updaterJar",
         )
 
         # Тестирование
         # Получаем все узлы, пишем всё на экран и пишем node_result.json по умолчанию
-        # all_nodes = configurator.get_all_nodes(max_retries=1)
-        # print("Все узлы:")
-        # for key, data in all_nodes.items():
-        #     print(f"{key}: {data}")
-        # configurator.save_node_result()
+        all_nodes = configurator.get_all_nodes(max_retries=1)
+        print("Все узлы:")
+        for key, data in all_nodes.items():
+            print(f"{key}: {data}")
+        configurator.save_node_result()
 
         # Получаем все узлы из файла, пишем всё на экран и пишем результат в server.json
         get_nodes_from_file = configurator.get_nodes_from_file()
@@ -320,20 +320,20 @@ if __name__ == "__main__":
         configurator.save_node_result(filename="server.json")
 
         # Запуск обновления серверов, просто выводим результат
-        update_servers = configurator.update_servers(version_sv="10.4.15.2")
+        update_servers = configurator.update_servers(version_sv="10.4.15.1")
         print("Результат обновления серверов:")
         for key, data in update_servers.items():
             print(f"{key}: {data}")
         configurator.save_node_result(filename="server_update.json")
 
         # Запуск обновления касс, просто выводим результат
-        # cash_update = configurator.update_cash_devices(
-        #     cash_type="POS", version="10.4.14.14"
-        # )
-        # print("\nРезультат обновления касс:")
-        # for key, data in cash_update.items():
-        #     print(f"{key}: {data}")
-        # configurator.save_node_result(filename="server_cash_update.json")
+        cash_update = configurator.update_cash_devices(
+            cash_type="POS", version="10.4.14.14"
+        )
+        print("\nРезультат обновления касс:")
+        for key, data in cash_update.items():
+            print(f"{key}: {data}")
+        configurator.save_node_result(filename="server_cash_update.json")
 
     except Exception as e:
         logging.error(f"Ошибка какая то: {str(e)}")
