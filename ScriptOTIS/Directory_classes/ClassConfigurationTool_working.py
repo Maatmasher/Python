@@ -289,6 +289,7 @@ class ConfiguratorTool:
             status = (node_data.get("status") or "").upper()
             node_type = (node_data.get("type") or "").strip()
             tp = node_data.get("tp") or node_id
+            ip = node_data.get("ip") or ""
             if tp.split(".")[3] == "0":
                 tp = tp.split(".")[2]
             else:
@@ -298,6 +299,8 @@ class ConfiguratorTool:
             list_entry = f"{tp}"
             if node_type:
                 list_entry += f"-{node_type}"
+            if ip:
+                list_entry += f"-{ip}"
 
             # Категоризация по статусам
             if status == "IN_WORK":
