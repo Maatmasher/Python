@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import asyncio
 import csv
 from datetime import datetime
@@ -7,13 +6,13 @@ import aiofiles
 
 # ========= КОНФИГУРАЦИЯ =========
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-HOSTS_FILE = os.path.join(CURRENT_DIR, "ip_list.txt")  # Список хостов
-LOG_FILE = os.path.join(CURRENT_DIR, "combined_command.log")  # Единый лог-файл
+HOSTS_FILE = os.path.join(CURRENT_DIR, "ip_list_combined.txt")  # Список хостов
+LOG_FILE = os.path.join(CURRENT_DIR, "command_combined.log")  # Единый лог-файл
 PING_RESULTS_FILE = os.path.join(
-    CURRENT_DIR, "ping_results.csv"
+    CURRENT_DIR, "ping_results_combined.csv"
 )  # Файл с результатами ping
-COMMAND_FILE = os.path.join(CURRENT_DIR, "command.txt")
-MAX_CONCURRENT_TASKS = 10  # Максимальное количество одновременных задач
+COMMAND_FILE = os.path.join(CURRENT_DIR, "command_combined.txt")
+MAX_CONCURRENT_TASKS = 5  # Максимальное количество одновременных задач, не увлекайтесь
 PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_txt}"
 USER = "tc"
 PASSWORD = "JnbcHekbn123"
