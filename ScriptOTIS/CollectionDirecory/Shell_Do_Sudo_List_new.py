@@ -1,4 +1,4 @@
-import paramiko
+import paramiko, socket
 import time
 import os
 from datetime import datetime
@@ -16,11 +16,11 @@ LOG_FILE = os.path.join(CURRENT_DIR, "commands.log")  # Файл логов
 # Параметры подключения
 USERNAME = "otis"
 PASSWORD = "MzL2qqOp"
-SUDO_PASSWORD = "MzL2qqOp"  # Если пароль не нужен, оставляем None
+# SUDO_PASSWORD = "MzL2qqOp"  # Если пароль не нужен, оставляем None
 
 
 # Параметры обработки серверов
-COUNT_SERVER = 3  # Количество серверов для обработки до паузы
+COUNT_SERVER = 2  # Количество серверов для обработки до паузы
 PAUSE_COMMAND = 30  # Пауза в секундах после обработки COUNT_SERVER серверов
 TIMEOUT = 600  # Таймаут выполнения команд в секундах
 # ================================
@@ -34,12 +34,12 @@ def read_commands_from_file(file_path):
 
         # Проверяем наличие финальной команды
         if not any("all command done" in cmd for cmd in commands):
-            commands.append('echo "all command done"')
+            commands.append("echo 'all command done'")
         print(commands)
         return commands
     except FileNotFoundError:
         print(f"Файл с командами не найден: {file_path}")
-        return ['echo "all command done"']  # Возвращаем минимальный набор команд
+        return ["echo 'all command done'"]  # Возвращаем минимальный набор команд
 
 
 def read_servers_from_file(file_path):
@@ -53,42 +53,28 @@ def read_servers_from_file(file_path):
         print(f"Файл с серверами не найден: {file_path}")
         return []
 
-def _execute_sudo_comands(host, username, password):
-    ssh = paramiko.SSHClient()
-    ssh.connect(host, username=username, password=password)
-    stdin, stdout, stderr = ssh.exec_command('sudo su - \n')
-    while not stdout.channel.exit_status_ready():
-        if stdout.channel.recv_ready():
-            print(stdout.channel.recv(1024).decode())
 
-def _execute_shell_comands(
-    host, username, password, commands, sudo_password=None, timeout=10
+def _execute_ssh_command(
+    host, command="sudo su -", username=USERNAME, password=PASSWORD
 ):
-    """Выполняет команды с sudo/su через SSH с интерактивной сессией"""
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    """Выполняет SSH команду на удаленном хосте"""
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(host, username=username, password=password, timeout=10)
 
-    # try:
-        # Подключаемся к серверу
-    ssh.connect(host, username=username, password=password)
-    stdin, stdout, stderr = ssh.exec_command('sudo su - \n')
-    output = ""
-    while not stdout.channel.exit_status_ready():
-        # Do something while waiting, like process output
-        if stdout.channel.recv_ready():
-            print(stdout.channel.recv(1024).decode())
+        stdin, stdout, stderr = ssh.exec_command(command)
+        output = stdout.read().decode("utf-8").strip()
+        error = stderr.read().decode("utf-8").strip()
 
+        ssh.close()
 
-def log_result(host, commands, output):
-    """Логирует результат выполнения команд"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if error:
+            return False, error
+        return True, output
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{timestamp}] [{host}] Выполнены команды:\n")
-        for cmd in commands:
-            f.write(f" - {cmd}\n")
-        f.write(f"Вывод:\n{output}\n")
-        f.write("-" * 50 + "\n")
+    except (paramiko.AuthenticationException, paramiko.SSHException, socket.error) as e:
+        return False, str(e)
 
 
 def process_servers():
@@ -116,16 +102,33 @@ def process_servers():
 
     for i, server in enumerate(servers, 1):
         print(f"Обрабатывается сервер {i}/{total_servers}: {server}")
-
         try:
-            _execute_shell_comands(
-                host=server,
-                username=USERNAME,
-                password=PASSWORD,
-                commands=commands,
-                sudo_password=SUDO_PASSWORD,
-                timeout=TIMEOUT,
-            )
+            ssh_success, ssh_result = _execute_ssh_command(host=server)
+            ssh_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if ssh_success:
+                ssh_message = f"[{ssh_timestamp}] SSH команда выполнена успешно на {server}: {ssh_result}\n"
+            else:
+                ssh_message = (
+                    f"[{ssh_timestamp}] Ошибка SSH на {server}: {ssh_result}\n"
+                )
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(ssh_message)
+
+            for cmd in commands:
+                ssh_success, ssh_result = _execute_ssh_command(
+                    host=server,
+                    command=cmd,
+                )
+                ssh_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if ssh_success:
+                    ssh_message = f"[{ssh_timestamp}] SSH команда выполнена успешно на {server}: {ssh_result}\n"
+                else:
+                    ssh_message = (
+                        f"[{ssh_timestamp}] Ошибка SSH на {server}: {ssh_result}\n"
+                    )
+                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write(ssh_message)
+
             print(f"✓ Сервер {server} обработан успешно")
 
         except Exception as e:
@@ -151,20 +154,6 @@ def process_servers():
 
 
 if __name__ == "__main__":
-    # Создаем примерные файлы, если они не существуют
-    if not os.path.exists(COMMANDS_FILE):
-        with open(COMMANDS_FILE, "w", encoding="utf-8") as f:
-            f.write(r"systemctl status nginx" "\n")
-            f.write(r"df -h" "\n")
-            f.write(r'echo "all command done"' "\n")
-        print(f"Создан файл с командами: {COMMANDS_FILE}")
-
-    if not os.path.exists(SERVERS_FILE):
-        with open(SERVERS_FILE, "w", encoding="utf-8") as f:
-            f.write("10.9.30.101\n")
-            f.write("10.9.30.102\n")
-        print(f"Создан файл с серверами: {SERVERS_FILE}")
-
     try:
         process_servers()
     except KeyboardInterrupt:
