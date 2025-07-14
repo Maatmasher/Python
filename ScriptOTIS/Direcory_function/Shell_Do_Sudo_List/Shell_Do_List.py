@@ -66,83 +66,6 @@ def read_servers_from_file(file_path):
         return []
 
 
-def _execute_sudo(host, username=USERNAME, password=PASSWORD):
-    """Выполняет SSH команду на удаленном хосте"""
-    try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(host, username=username, password=password, timeout=10)
-
-        stdin, stdout, stderr = ssh.exec_command(
-            command="sudo su -", timeout=5, get_pty=True
-        )
-        output = stdout.read().decode("utf-8").strip()
-        error = stderr.read().decode("utf-8").strip()
-        stdin, stdout, stderr = ssh.exec_command(command="\n", timeout=5, get_pty=True)
-        output += stdout.read().decode("utf-8").strip()
-        error += stderr.read().decode("utf-8").strip()
-        stdin, stdout, stderr = ssh.exec_command(
-            command="echo 'sudo done'", timeout=5, get_pty=True
-        )
-        output += stdout.read().decode("utf-8").strip()
-        error += stderr.read().decode("utf-8").strip()
-        stdin, stdout, stderr = ssh.exec_command(
-            command="echo '\n'", timeout=5, get_pty=True
-        )
-        output += stdout.read().decode("utf-8").strip()
-        error += stderr.read().decode("utf-8").strip()
-        ssh.close()
-
-        if error:
-            return False, clean_ansi_escape(error)
-        return True, clean_ansi_escape(output)
-
-    except (
-        paramiko.AuthenticationException,
-        paramiko.SSHException,
-        socket.error,
-        TimeoutError,
-    ) as e:
-        return False, str(e)
-
-
-def _execute_interactive_sudo(
-    host, command="sudo su -", username=USERNAME, password=PASSWORD, timeout=5
-):
-    ssh = None
-    try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(host, username=username, password=password)
-
-        chan = ssh.invoke_shell()
-        chan.settimeout(timeout)
-
-        # Отправка команды
-        chan.send(command.encode("utf-8") + "\n".encode("utf-8"))
-
-        # Ожидание вывода
-        output = []
-        start_time = time.time()
-
-        while True:
-            if chan.recv_ready():
-                data = clean_ansi_escape(chan.recv(1024).decode())
-                output.append(data)
-                if "password" in data.lower():  # Если запросит пароль
-                    chan.send(password.encode("utf-8") + "\n".encode("utf-8"))
-            elif time.time() - start_time > timeout:
-                break
-            time.sleep(0.1)
-
-        return True, "".join(output)
-    except Exception as e:
-        return False, str(e)
-    finally:
-        if ssh:
-            ssh.close()
-
-
 def _execute_ssh_command(host, command, username=USERNAME, password=PASSWORD):
     """Выполняет SSH команду на удаленном хосте"""
     ssh = None
@@ -226,22 +149,6 @@ def process_servers():
     total_servers = len(servers)
 
     for i, server in enumerate(servers, 1):
-        # try:
-        #     print(f"Обрабатывается сервер {i}/{total_servers}: {server}")
-        #     sudo_success, sudo_result = _execute_sudo(
-        #         host=server,
-        #     )
-        #     sudo_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        #     if sudo_success:
-        #         sudo_message = f"[{sudo_timestamp}] Sudo команда выполнена успешно на {server}: {sudo_result}\n"
-        #     else:
-        #         sudo_message = (
-        #             f"[{sudo_timestamp}] Ошибка Sudo на {server}: {sudo_result}\n"
-        #         )
-        #     with open(LOG_FILE, "a", encoding="utf-8") as f:
-        #         f.write(sudo_message)
-        # except Exception as e:
-        #     print(f"✗ Ошибка при обработке сервера {server}: {e}")
         try:
             for cmd in commands:
                 ssh_success, ssh_result = _execute_ssh_command(
