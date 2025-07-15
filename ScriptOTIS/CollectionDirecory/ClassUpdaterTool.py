@@ -11,6 +11,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+
 class ConfiguratorTool:
     """Инициализация класса, если не найдена JAR ошибка"""
 
@@ -418,67 +419,78 @@ class ConfiguratorTool:
 
 class ServerUpdater:
     """Класс для пошагового обновления серверов с контролем нагрузки"""
-    
-    def __init__(self, configurator: ConfiguratorTool, target_version: str = "10.4.15.11", 
-                 batch_size: int = 5, max_iterations: Optional[int] = None):
+
+    def __init__(
+        self,
+        configurator: ConfiguratorTool,
+        target_version: str = "10.4.15.11",
+        batch_size: int = 5,
+        max_iterations: Optional[int] = None,
+    ):
         self.configurator = configurator
         self.target_version = target_version
         self.batch_size = batch_size
         self.max_iterations = max_iterations
         self.current_iteration = 0
         self.updated_servers: Set[str] = set()
-        
+
     def extract_tp_index(self, tp: str) -> str:
         """Извлекает индекс из tp формата '1.0.индекс.0'"""
-        parts = tp.split('.')
+        parts = tp.split(".")
         if len(parts) >= 3:
             if parts[3] == "0":
                 return parts[2]
             else:
                 return f"{parts[2]}.{parts[3]}"
         return tp
-    
+
     def get_retail_servers_to_update(self, all_nodes: Dict) -> List[Dict]:
         """Получает список серверов RETAIL, которые нужно обновить"""
         servers_to_update = []
-        
+
         for ip, node_data in all_nodes.items():
-            if (node_data.get("type") == "RETAIL" and 
-                node_data.get("cv") != self.target_version and
-                ip not in self.updated_servers):
-                servers_to_update.append({
-                    "ip": ip,
-                    "tp": node_data.get("tp"),
-                    "current_version": node_data.get("cv"),
-                    "tp_index": self.extract_tp_index(node_data.get("tp", ""))
-                })
-        
+            if (
+                node_data.get("type") == "RETAIL"
+                and node_data.get("cv") != self.target_version
+                and ip not in self.updated_servers
+            ):
+                servers_to_update.append(
+                    {
+                        "ip": ip,
+                        "tp": node_data.get("tp"),
+                        "current_version": node_data.get("cv"),
+                        "tp_index": self.extract_tp_index(node_data.get("tp", "")),
+                    }
+                )
+
         return servers_to_update
-    
-    def create_server_file(self, servers: List[Dict], filename: str = "server.txt") -> None:
+
+    def create_server_file(
+        self, servers: List[Dict], filename: str = "server.txt"
+    ) -> None:
         """Создает файл server.txt с индексами серверов"""
         filepath = self.configurator.config_dir / filename
-        
+
         with open(filepath, "w", encoding="utf-8") as f:
             for server in servers:
                 f.write(f"{server['tp_index']}\n")
-        
+
         logging.info(f"Создан файл {filename} с {len(servers)} серверами")
-    
+
     def check_file_exists(self, filename: str) -> bool:
         """Проверяет существование файла"""
         filepath = self.configurator.config_dir / filename
         return filepath.exists() and filepath.stat().st_size > 0
-    
+
     def read_file_lines(self, filename: str) -> List[str]:
         """Читает строки из файла"""
         filepath = self.configurator.config_dir / filename
         if not filepath.exists():
             return []
-        
+
         with open(filepath, "r", encoding="utf-8") as f:
             return [line.strip() for line in f.readlines() if line.strip()]
-    
+
     def restart_service_with_plink(self, servers: List[str], restart_file: str) -> bool:
         """Перезапускает службу на серверах используя PLINK"""
         try:
@@ -486,7 +498,7 @@ class ServerUpdater:
             if not restart_filepath.exists():
                 logging.error(f"Файл команд {restart_file} не найден")
                 return False
-            
+
             for server in servers:
                 logging.info(f"Перезапуск службы на сервере {server}")
                 try:
@@ -497,156 +509,173 @@ class ServerUpdater:
                 except subprocess.CalledProcessError as e:
                     logging.error(f"Ошибка перезапуска службы на {server}: {e}")
                     return False
-            
+
             return True
         except Exception as e:
             logging.error(f"Ошибка при перезапуске служб: {e}")
             return False
-    
-    def compare_servers_and_versions(self, work_servers: List[str], 
-                                   original_servers: List[Dict]) -> tuple[bool, List[str]]:
+
+    def compare_servers_and_versions(
+        self, work_servers: List[str], original_servers: List[Dict]
+    ) -> tuple[bool, List[str]]:
         """Сравнивает серверы из work_tp с исходными и проверяет версии"""
         # Получаем актуальные данные серверов
         current_nodes = self.configurator.get_nodes_from_file()
-        
+
         # Сравниваем количество и индексы
-        original_indices = {server['tp_index'] for server in original_servers}
+        original_indices = {server["tp_index"] for server in original_servers}
         work_indices = set()
-        
+
         for server_info in work_servers:
             # Извлекаем индекс из строки формата "индекс-тип-ip-версия"
-            tp_index = server_info.split('-')[0]
+            tp_index = server_info.split("-")[0]
             work_indices.add(tp_index)
-        
+
         if original_indices != work_indices:
-            logging.error(f"Несоответствие серверов: ожидалось {original_indices}, получено {work_indices}")
+            logging.error(
+                f"Несоответствие серверов: ожидалось {original_indices}, получено {work_indices}"
+            )
             return False, []
-        
+
         # Проверяем версии
         incorrect_versions = []
         for server_info in work_servers:
-            parts = server_info.split('-')
+            parts = server_info.split("-")
             if len(parts) >= 4:
                 server_version = parts[3]
                 if server_version != self.target_version:
                     incorrect_versions.append(server_info)
-        
+
         if incorrect_versions:
             logging.error(f"Серверы с неправильными версиями: {incorrect_versions}")
             return False, incorrect_versions
-        
+
         return True, []
-    
+
     def update_servers_batch(self) -> bool:
         """Основной метод обновления серверов по батчам"""
         logging.info("Начинаем пошаговое обновление серверов")
-        
+
         while True:
             # Шаг 0: Проверка количества итераций
             if self.max_iterations and self.current_iteration >= self.max_iterations:
-                logging.info("Достигнуто максимальное количество итераций. Обновление завершено успешно.")
+                logging.info(
+                    "Достигнуто максимальное количество итераций. Обновление завершено успешно."
+                )
                 return True
-            
+
             # Получаем все узлы
             all_nodes = self.configurator.get_all_nodes(max_retries=3)
             if "error" in all_nodes:
                 logging.error(f"Ошибка получения узлов: {all_nodes['error']}")
                 return False
-            
+
             # Шаг 1: Получаем серверы для обновления
             servers_to_update = self.get_retail_servers_to_update(all_nodes)
-            
+
             if not servers_to_update:
                 logging.info("Все серверы RETAIL уже обновлены до целевой версии")
                 return True
-            
+
             # Берем следующий batch
-            current_batch = servers_to_update[:self.batch_size]
+            current_batch = servers_to_update[: self.batch_size]
             self.current_iteration += 1
-            
-            logging.info(f"Итерация {self.current_iteration}: обновляем {len(current_batch)} серверов")
-            
+
+            logging.info(
+                f"Итерация {self.current_iteration}: обновляем {len(current_batch)} серверов"
+            )
+
             # Создаем файл server.txt
             self.create_server_file(current_batch)
-            
+
             # Шаг 2: Запуск обновления
             logging.info(f"Запуск обновления до версии {self.target_version}")
-            update_result = self.configurator.update_servers(version_sv=self.target_version)
-            
+            update_result = self.configurator.update_servers(
+                version_sv=self.target_version
+            )
+
             if "error" in update_result:
                 logging.error(f"Ошибка запуска обновления: {update_result['error']}")
                 return False
-            
+
             # Главный цикл ожидания завершения обновления
             while True:
                 # Шаг 3: Ждем 10 минут
                 logging.info("Ожидание 10 минут перед проверкой статуса...")
                 time.sleep(600)  # 10 минут
-                
+
                 # Проверяем статусы
                 self.configurator.get_nodes_from_file()
                 self.configurator.save_status_lists(prefix="server_")
-                
+
                 # Шаг 4: Проверка ошибок
                 if self.check_file_exists("server_error_tp.txt"):
                     error_servers = self.read_file_lines("server_error_tp.txt")
-                    logging.error(f"Обнаружены ошибки обновления на серверах: {error_servers}")
+                    logging.error(
+                        f"Обнаружены ошибки обновления на серверах: {error_servers}"
+                    )
                     return False
-                
+
                 # Шаг 5: Проверка процесса обновления
                 if self.check_file_exists("server_update_tp.txt"):
                     update_servers = self.read_file_lines("server_update_tp.txt")
                     logging.info(f"Серверы все еще обновляются: {update_servers}")
                     continue  # Возвращаемся к шагу 3
-                
+
                 # Шаг 6: Проверка CCM
                 if self.check_file_exists("server_ccm_tp.txt"):
                     ccm_servers = self.read_file_lines("server_ccm_tp.txt")
                     logging.info(f"Перезапуск CCM на серверах: {ccm_servers}")
-                    
+
                     # Шаг 7: Перезапуск CCM
                     if not self.restart_service_with_plink(ccm_servers, "ccm_restart"):
                         logging.error("Ошибка перезапуска CCM")
                         return False
                     continue  # Возвращаемся к шагу 3
-                
+
                 # Шаг 8: Проверка unzip
                 if self.check_file_exists("server_unzip_tp.txt"):
                     unzip_servers = self.read_file_lines("server_unzip_tp.txt")
                     logging.info(f"Перезапуск unzip на серверах: {unzip_servers}")
-                    
+
                     # Шаг 9: Перезапуск unzip
-                    if not self.restart_service_with_plink(unzip_servers, "unzip_restart"):
+                    if not self.restart_service_with_plink(
+                        unzip_servers, "unzip_restart"
+                    ):
                         logging.error("Ошибка перезапуска unzip")
                         return False
                     continue  # Возвращаемся к шагу 3
-                
+
                 # Шаг 10: Проверка work_tp
                 if self.check_file_exists("server_work_tp.txt"):
                     work_servers = self.read_file_lines("server_work_tp.txt")
                     logging.info(f"Серверы в работе: {work_servers}")
-                    
+
                     # Шаг 11: Сравнение серверов
-                    servers_match, incorrect_versions = self.compare_servers_and_versions(
-                        work_servers, current_batch)
-                    
+                    servers_match, incorrect_versions = (
+                        self.compare_servers_and_versions(work_servers, current_batch)
+                    )
+
                     if not servers_match:
                         logging.error("Несоответствие серверов или версий")
                         return False
-                    
+
                     # Шаг 12: Проверка версий
                     if not incorrect_versions:
                         logging.info(f"Батч {self.current_iteration} успешно обновлен")
                         # Добавляем обновленные серверы в множество
                         for server in current_batch:
-                            self.updated_servers.add(server['ip'])
+                            self.updated_servers.add(server["ip"])
                         break  # Переходим к следующему батчу (шаг 0)
                     else:
-                        logging.error(f"Серверы с неправильными версиями: {incorrect_versions}")
+                        logging.error(
+                            f"Серверы с неправильными версиями: {incorrect_versions}"
+                        )
                         return False
                 else:
                     # Нет файла work_tp, возвращаемся к шагу 3
                     continue
+
 
 # Пример использования
 if __name__ == "__main__":
@@ -655,22 +684,22 @@ if __name__ == "__main__":
             centrum_host="10.21.11.45",
             config_dir="C:\\Users\\iakushin.n\\Documents\\GitHub\\Python\\updaterJar",
         )
-        
+
         # Создаем обновлятель с целевой версией и размером батча
         updater = ServerUpdater(
             configurator=configurator,
             target_version="10.4.15.11",
             batch_size=5,
-            max_iterations=10  # Опционально ограничиваем количество итераций
+            max_iterations=10,  # Опционально ограничиваем количество итераций
         )
-        
+
         # Запускаем обновление
         success = updater.update_servers_batch()
-        
+
         if success:
             logging.info("Все серверы успешно обновлены!")
         else:
             logging.error("Обновление завершилось с ошибками")
-            
+
     except Exception as e:
         logging.error(f"Критическая ошибка: {str(e)}")

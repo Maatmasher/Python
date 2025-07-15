@@ -1,0 +1,3 @@
+sudo su - << END_IN
+systemctl restart SCM_SVC.service
+END_IN
