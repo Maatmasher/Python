@@ -8,7 +8,7 @@ import os
 
 # ==================== КОНФИГУРАЦИОННЫЕ ПАРАМЕТРЫ ====================
 # Основные настройки
-CENTRUM_HOST = "10.9.30.101"
+CENTRUM_HOST = "10.21.11.45"
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(CURRENT_DIR, "updaterJar")
 JAR_NAME = "ConfiguratorCmdClient-1.5.1.jar"
@@ -21,9 +21,9 @@ PING_TIMEOUT = 1000  # мс
 PLINK_TIMEOUT = 300  # секунды (5 минут)
 
 # Настройки обновления
-TARGET_VERSION = "10.4.16.6"
+TARGET_VERSION = "10.4.15.11"
 BATCH_SIZE = 2
-MAX_ITERATIONS = 2  # None для неограниченного количества
+MAX_ITERATIONS = 1  # None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
 MAX_RETRIES_SINGLE = 1
 DEFAULT_NO_BACKUP = True
@@ -43,18 +43,18 @@ FILES = {
     "unzip_restart_commands": os.path.join(PLINK_DIR, "unzip_commands.txt"),
     # Файлы статусов (с префиксом)
     "status_prefix": "server_",
-    "work_tp": os.path.join(FILES_DIR, "work_tp.txt"),
-    "error_tp": os.path.join(FILES_DIR, "error_tp.txt"),
-    "update_tp": os.path.join(FILES_DIR, "update_tp.txt"),
-    "ccm_tp": os.path.join(FILES_DIR, "ccm_tp.txt"),
-    "unzip_tp": os.path.join(FILES_DIR, "unzip_tp.txt"),
-    "no_update_needed_tp": os.path.join(FILES_DIR, "no_update_needed_tp.txt"),
+    "work_tp": "work_tp.txt",
+    "error_tp": "error_tp.txt",
+    "update_tp": "update_tp.txt",
+    "ccm_tp": "ccm_tp.txt",
+    "unzip_tp": "unzip_tp.txt",
+    "no_update_needed_tp": "no_update_needed_tp.txt",
 }
 # ====================================================================
 
 # Настройка логирования
 log_format = "%(asctime)s - %(levelname)s - %(message)s"
-log_level = logging.DEBUG
+log_level = logging.INFO
 
 # Создаем логгер
 logger = logging.getLogger(__name__)
@@ -508,7 +508,7 @@ class UnifiedServerUpdater:
             f"no_update_needed_tp: {len(self.no_update_needed_tp)}"
         )
 
-    def save_status_lists(self, prefix: str = ""):
+    def _save_status_lists(self, prefix: str = ""):
         """Сохраняет все списки статусов в отдельные файлы"""
         logger.debug(f"Сохранение списков статусов с префиксом '{prefix}'")
 
@@ -523,7 +523,12 @@ class UnifiedServerUpdater:
 
         # Удаляем старые файлы
         for filename in lists_to_save:
-            filepath: Path = self.config_dir / (prefix + filename)
+            # Формируем путь: добавляем префикс только к имени файла, а не ко всему пути
+            filepath = (
+                self.config_dir / (prefix + filename)
+                if prefix
+                else self.config_dir / filename
+            )
             if filepath.is_file():
                 logger.debug(f"Удаление старого файла: {filepath}")
                 filepath.unlink()
@@ -534,10 +539,60 @@ class UnifiedServerUpdater:
                 logger.debug(f"Нет данных для сохранения в {filename}")
                 continue
 
-            filepath: Path = self.config_dir / (prefix + filename)
+            # Формируем путь: добавляем префикс только к имени файла, а не ко всему пути
+            filepath = (
+                self.config_dir / (prefix + filename)
+                if prefix
+                else self.config_dir / filename
+            )
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write("\n".join(data))
             logger.info(f"Список сохранен в {filepath} (записей: {len(data)})")
+
+    def save_status_lists(self, prefix: str = ""):
+        """Сохраняет все списки статусов в отдельные файлы"""
+        logger.debug(f"Сохранение списков статусов с префиксом '{prefix}'")
+
+        lists_to_save = {
+            FILES["work_tp"]: self.work_tp,
+            FILES["error_tp"]: self.error_tp,
+            FILES["update_tp"]: self.update_tp,
+            FILES["ccm_tp"]: self.ccm_tp,
+            FILES["unzip_tp"]: self.unzip_tp,
+            FILES["no_update_needed_tp"]: self.no_update_needed_tp,
+        }
+
+        for orig_name, data in lists_to_save.items():
+            # берём только имя файла, без каталогов
+            base_name = Path(orig_name).name
+            target_path = self.config_dir / f"{prefix}{base_name}"
+            # удалить старый
+            if target_path.exists():
+                target_path.unlink()
+            # записать новый
+            if data:  # список не пуст
+                target_path.write_text("\n".join(data), encoding="utf-8")
+                logger.info("Записан %s (%d строк)", target_path, len(data))
+            else:
+                logger.debug("Список %s пуст – файл не создаётся", base_name)
+
+        # Удаляем старые файлы
+        # for filename in lists_to_save:
+        #     filepath: Path = self.config_dir / (prefix + filename)
+        #     if filepath.is_file():
+        #         logger.debug(f"Удаление старого файла: {filepath}")
+        #         filepath.unlink()
+
+        # Пишем новые файлы
+        # for filename, data in lists_to_save.items():
+        #     if not data:
+        #         logger.debug(f"Нет данных для сохранения в {filename}")
+        #         continue
+
+        #     filepath: Path = self.config_dir / (prefix + filename)
+        #     with open(filepath, "w", encoding="utf-8") as f:
+        #         f.write("\n".join(data))
+        #     logger.info(f"Список сохранен в {filepath} (записей: {len(data)})")
 
     def get_all_nodes(
         self, max_retries: int = MAX_RETRIES_DEFAULT
@@ -1062,24 +1117,24 @@ if __name__ == "__main__":
         updater = UnifiedServerUpdater()
 
         # Получить статус всех узлов
-        logger.info("Получение статуса всех узлов")
+        # logger.info("Получение статуса всех узлов")
         # all_nodes = updater.get_nodes_from_file()
-        all_nodes = updater.get_all_nodes()
-        all_nodes_result = updater.save_node_result()
-        all_nodes_save = updater.save_status_lists()
-        if all_nodes:
-            logger.info("Все серверы успешно собраны!")
-        else:
-            logger.error("Сбор завершился с ошибками")
+        # all_nodes = updater.get_all_nodes()
+        # all_nodes_result = updater.save_node_result()
+        # all_nodes_save = updater.save_status_lists()
+        # if all_nodes:
+        #     logger.info("Все серверы успешно собраны!")
+        # else:
+        #     logger.error("Сбор завершился с ошибками")
 
         # Запускаем обновление
-        # logger.info("Запуск процесса обновления")
-        # success = updater.update_servers_batch()
+        logger.info("Запуск процесса обновления")
+        success = updater.update_servers_batch()
 
-        # if success:
-        #     logger.info("Все серверы успешно обновлены!")
-        # else:
-        #     logger.error("Обновление завершилось с ошибками")
+        if success:
+            logger.info("Все серверы успешно обновлены!")
+        else:
+            logger.error("Обновление завершилось с ошибками")
 
     except Exception as e:
         logger.critical(f"Критическая ошибка: {str(e)}", exc_info=True)
