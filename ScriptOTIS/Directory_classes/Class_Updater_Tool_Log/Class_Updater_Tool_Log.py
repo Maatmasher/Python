@@ -22,12 +22,16 @@ PLINK_TIMEOUT = 300  # секунды (5 минут)
 
 # Настройки обновления
 TARGET_VERSION = "10.4.15.11"
-BATCH_SIZE = 2
-MAX_ITERATIONS = 1  # None для неограниченного количества
+BATCH_SIZE = 5  # Сколько серверов за раз
+MAX_ITERATIONS = 3  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
 MAX_RETRIES_SINGLE = 1
-DEFAULT_NO_BACKUP = True
-DEFAULT_AUTO_RESTART = True
+DEFAULT_NO_BACKUP = True  #
+DEFAULT_AUTO_RESTART = True  #
+PRE_UPDATE_RESTART = (
+    True  # Флаг для предварительного перезапуска служб перед обновлением
+)
+PRE_UPDATE_TIMEOUT = 60  #
 
 # Таймауты и интервалы
 WAIT_BETWEEN_RETRIES = 2  # секунды
@@ -36,8 +40,8 @@ SERVICE_RESTART_DELAY = 2  # секунды между перезапускам�
 
 # Имена файлов
 FILES = {
-    "server_list": os.path.join(FILES_DIR, "server.txt"),
-    "server_cash_list": os.path.join(FILES_DIR, "server_cash.txt"),
+    "server_list": "server.txt",
+    "server_cash_list": "server_cash.txt",
     "node_result": os.path.join(FILES_DIR, "node_result.json"),
     "ccm_restart_commands": os.path.join(PLINK_DIR, "ccm_commands.txt"),
     "unzip_restart_commands": os.path.join(PLINK_DIR, "unzip_commands.txt"),
@@ -49,6 +53,7 @@ FILES = {
     "ccm_tp": "ccm_tp.txt",
     "unzip_tp": "unzip_tp.txt",
     "no_update_needed_tp": "no_update_needed_tp.txt",
+    "unavailable_tp": "unavailable_tp.txt",
 }
 # ====================================================================
 
@@ -113,6 +118,7 @@ class UnifiedServerUpdater:
         self.ccm_tp: List[str] = []
         self.unzip_tp: List[str] = []
         self.no_update_needed_tp: List[str] = []
+        self.unavailable: List[str] = []
 
         # Параметры из ServerUpdater
         self.target_version = target_version
@@ -447,6 +453,7 @@ class UnifiedServerUpdater:
         self.ccm_tp = []
         self.unzip_tp = []
         self.no_update_needed_tp = []
+        self.unavailable = []
 
         for node_id, node_data in self.node_result.items():
             status = (node_data.get("status") or "").upper()
@@ -500,54 +507,17 @@ class UnifiedServerUpdater:
             elif status == "NO_UPDATE_NEEDED":
                 self.no_update_needed_tp.append(list_entry)
                 logger.debug(f"Добавлен в no_update_needed_tp: {list_entry}")
+            elif status == "UNAVAILABLE":
+                self.unavailable.append(list_entry)
+                logger.debug(f"Добавлен в unavailable: {list_entry}")
 
         logger.info(
             f"Категоризация завершена. work_tp: {len(self.work_tp)}, "
             f"error_tp: {len(self.error_tp)}, update_tp: {len(self.update_tp)}, "
             f"ccm_tp: {len(self.ccm_tp)}, unzip_tp: {len(self.unzip_tp)}, "
-            f"no_update_needed_tp: {len(self.no_update_needed_tp)}"
+            f"no_update_needed_tp: {len(self.no_update_needed_tp)}, "
+            f"unavailable: {len(self.unavailable)}"
         )
-
-    def _save_status_lists(self, prefix: str = ""):
-        """Сохраняет все списки статусов в отдельные файлы"""
-        logger.debug(f"Сохранение списков статусов с префиксом '{prefix}'")
-
-        lists_to_save = {
-            FILES["work_tp"]: self.work_tp,
-            FILES["error_tp"]: self.error_tp,
-            FILES["update_tp"]: self.update_tp,
-            FILES["ccm_tp"]: self.ccm_tp,
-            FILES["unzip_tp"]: self.unzip_tp,
-            FILES["no_update_needed_tp"]: self.no_update_needed_tp,
-        }
-
-        # Удаляем старые файлы
-        for filename in lists_to_save:
-            # Формируем путь: добавляем префикс только к имени файла, а не ко всему пути
-            filepath = (
-                self.config_dir / (prefix + filename)
-                if prefix
-                else self.config_dir / filename
-            )
-            if filepath.is_file():
-                logger.debug(f"Удаление старого файла: {filepath}")
-                filepath.unlink()
-
-        # Пишем новые файлы
-        for filename, data in lists_to_save.items():
-            if not data:
-                logger.debug(f"Нет данных для сохранения в {filename}")
-                continue
-
-            # Формируем путь: добавляем префикс только к имени файла, а не ко всему пути
-            filepath = (
-                self.config_dir / (prefix + filename)
-                if prefix
-                else self.config_dir / filename
-            )
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write("\n".join(data))
-            logger.info(f"Список сохранен в {filepath} (записей: {len(data)})")
 
     def save_status_lists(self, prefix: str = ""):
         """Сохраняет все списки статусов в отдельные файлы"""
@@ -560,6 +530,7 @@ class UnifiedServerUpdater:
             FILES["ccm_tp"]: self.ccm_tp,
             FILES["unzip_tp"]: self.unzip_tp,
             FILES["no_update_needed_tp"]: self.no_update_needed_tp,
+            FILES["unavailable_tp"]: self.unavailable,
         }
 
         for orig_name, data in lists_to_save.items():
@@ -761,51 +732,31 @@ class UnifiedServerUpdater:
         return exists
 
     def read_file_lines(self, filename: str) -> List[str]:
-        """Читает строки из файла"""
+        """Читает строки из файла, игнорируя строки с индексом '0'"""
         filepath = self.config_dir / filename
         if not filepath.exists():
             logger.warning(f"Файл {filename} не существует")
             return []
 
-        logger.debug(f"Чтение строк из файла {filename}")
+        logger.debug(f"Чтение строк из файла {filename} (игнорируя индекс '0')")
+        valid_lines = []
+
         with open(filepath, "r", encoding="utf-8") as f:
-            lines = [line.strip() for line in f.readlines() if line.strip()]
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue  # Пропускаем пустые строки
 
-        logger.debug(f"Прочитано строк: {len(lines)}")
-        return lines
+                # Разбиваем строку по первому "-" для проверки индекса
+                parts = line.split("-", 1)
+                if parts[0] == "0":
+                    logger.debug(f"Игнорируем строку с индексом '0': {line}")
+                    continue
 
-    def _restart_service_with_plink(
-        self, servers: List[str], restart_file: str
-    ) -> bool:
-        """Перезапускает службу на серверах используя PLINK"""
-        logger.info(
-            f"Перезапуск службы на серверах {servers} с использованием файла {restart_file}"
-        )
-        try:
-            restart_filepath = self.config_dir / restart_file
-            if not restart_filepath.exists():
-                error_msg = f"Файл команд {restart_file} не найден"
-                logger.error(error_msg)
-                return False
+                valid_lines.append(line)
 
-            for server in servers:
-                logger.info(f"Перезапуск службы на сервере {server}")
-                try:
-                    # Здесь должна быть логика выполнения команд из файла restart_file
-                    # Пример: subprocess.run(["plink.exe", "-batch", server, "command"], check=True)
-                    logger.debug(f"Имитация перезапуска службы на {server}")
-                    time.sleep(SERVICE_RESTART_DELAY)
-                    logger.info(f"Служба на сервере {server} перезапущена")
-                except subprocess.CalledProcessError as e:
-                    logger.error(
-                        f"Ошибка перезапуска службы на {server}: {e}", exc_info=True
-                    )
-                    return False
-
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка при перезапуске служб: {e}", exc_info=True)
-            return False
+        logger.debug(f"Прочитано строк (без '0'): {len(valid_lines)}")
+        return valid_lines
 
     def restart_service_with_plink(self, servers: List[str], restart_file: str) -> bool:
         """Перезапускает службу на серверах используя PLINK"""
@@ -847,6 +798,7 @@ class UnifiedServerUpdater:
                 )
 
                 # Проверяем доступность через ping
+
                 logging.debug(f"Проверка доступности {server_ip} через ping")
                 if not self._check_ping(server_ip):
                     logging.warning(
@@ -949,31 +901,43 @@ class UnifiedServerUpdater:
         """Сравнивает серверы из work_tp с исходными и проверяет версии"""
         logger.info("Сравнение серверов и версий")
 
-        original_indices = {server["tp_index"] for server in original_servers}
+        # 3. Игнорируем строки с индексом 0
+        original_indices = {
+            server["tp_index"]
+            for server in original_servers
+            # if server["tp_index"] != "0"
+        }
+
         work_indices = set()
+        incorrect_versions = []
 
         for server_info in work_servers:
-            tp_index = server_info.split("-")[0]
-            work_indices.add(tp_index)
-            logger.debug(f"Индекс из work_tp: {tp_index}")
+            parts = server_info.split("-")
+            if len(parts) >= 1:
+                tp_index = parts[0]
+                # Пропускаем серверы с индексом 0
+                if tp_index == "0":
+                    logger.debug(f"Игнорируем сервер с индексом 0: {server_info}")
+                    continue
+
+                work_indices.add(tp_index)
+                logger.debug(f"Индекс из work_tp: {tp_index}")
+
+                # Проверяем версию, если есть информация о версии в строке
+                if len(parts) >= 4:
+                    server_version = parts[3]
+                    if server_version != self.target_version:
+                        logger.warning(f"Неверная версия у сервера {server_info}")
+                        incorrect_versions.append(server_info)
 
         logger.debug(f"Оригинальные индексы: {original_indices}")
-        logger.debug(f"Индексы из work_tp: {work_indices}")
+        logger.debug(f"Индексы из work_tp (без 0): {work_indices}")
 
         if original_indices != work_indices:
             logger.error(
                 f"Несоответствие серверов: ожидалось {original_indices}, получено {work_indices}"
             )
-            return False, []
-
-        incorrect_versions = []
-        for server_info in work_servers:
-            parts = server_info.split("-")
-            if len(parts) >= 4:
-                server_version = parts[3]
-                if server_version != self.target_version:
-                    logger.warning(f"Неверная версия у сервера {server_info}")
-                    incorrect_versions.append(server_info)
+            return False, incorrect_versions
 
         if incorrect_versions:
             logger.error(f"Серверы с неправильными версиями: {incorrect_versions}")
@@ -982,28 +946,114 @@ class UnifiedServerUpdater:
         logger.info("Все серверы соответствуют ожидаемым и имеют правильные версии")
         return True, []
 
+    def _perform_pre_restart(self):
+        """Выполняет предварительный перезапуск служб"""
+        logger.info("Выполнение предварительного перезапуска служб")
+        work_servers = self.read_file_lines(FILES["work_tp"])
+        if work_servers:
+            logger.info(f"Перезапуск служб на серверах: {work_servers}")
+            if not self.restart_service_with_plink(
+                work_servers, FILES["ccm_restart_commands"]
+            ):
+                logger.error("Ошибка предварительного перезапуска служб")
+                return False
+        logger.info(f"Ожидание {PRE_UPDATE_TIMEOUT} секунд...")
+        time.sleep(PRE_UPDATE_TIMEOUT)
+        return True
+
+    def _monitor_update_status(self, current_batch: List[Dict]) -> bool:
+        """Мониторит статус обновления для текущего батча"""
+        while True:
+            logger.info(
+                f"Ожидание {STATUS_CHECK_INTERVAL // 60} минут перед проверкой..."
+            )
+            time.sleep(STATUS_CHECK_INTERVAL)
+
+            # Получаем статус только для текущего батча
+            self.get_nodes_from_file()
+            self.save_status_lists(prefix=FILES["status_prefix"])
+
+            # Проверяем ошибки
+            if self._check_errors():
+                return False
+
+            # Проверяем статусы обновления
+            status_check = self._check_update_statuses(current_batch)
+            if status_check is not None:  # None означает продолжение ожидания
+                return status_check
+
+    def _check_errors(self) -> bool:
+        """Проверяет наличие ошибок обновления"""
+        if self.check_file_exists(FILES["status_prefix"] + FILES["error_tp"]):
+            error_servers = self.read_file_lines(
+                FILES["status_prefix"] + FILES["error_tp"]
+            )
+            logger.error(f"Ошибки обновления на серверах: {error_servers}")
+            return True
+        return False
+
+    def _check_update_statuses(self, current_batch: List[Dict]) -> Optional[bool]:
+        """Проверяет различные статусы обновления"""
+        # Проверяем необходимость перезапуска служб
+        if self._handle_service_restart(FILES["ccm_tp"], FILES["ccm_restart_commands"]):
+            return None
+        if self._handle_service_restart(
+            FILES["unzip_tp"], FILES["unzip_restart_commands"]
+        ):
+            return None
+
+        # Проверяем завершение обновления
+        if self.check_file_exists(FILES["status_prefix"] + FILES["work_tp"]):
+            work_servers = self.read_file_lines(
+                FILES["status_prefix"] + FILES["work_tp"]
+            )
+            servers_match, incorrect_versions = self.compare_servers_and_versions(
+                work_servers, current_batch
+            )
+            if servers_match and not incorrect_versions:
+                return True
+        return None
+
+    def _handle_service_restart(self, status_file: str, commands_file: str) -> bool:
+        """Обрабатывает перезапуск служб при необходимости"""
+        if self.check_file_exists(FILES["status_prefix"] + status_file):
+            servers = self.read_file_lines(FILES["status_prefix"] + status_file)
+            logger.info(f"Перезапуск служб на серверах: {servers}")
+            if not self.restart_service_with_plink(servers, commands_file):
+                logger.error(f"Ошибка перезапуска служб ({status_file})")
+                return False
+            return True
+        return False
+
     def update_servers_batch(self) -> bool:
-        """Основной метод обновления серверов по частям"""
+        """Основной метод обновления серверов по частям с сохранением состояния"""
         logger.info("Начало пошагового обновления серверов")
+
+        # Получаем все узлы один раз в начале
+        logger.debug("Первоначальное получение списка всех узлов")
+        initial_nodes = self.get_all_nodes(max_retries=MAX_RETRIES_DEFAULT)
+        if "error" in initial_nodes:
+            logger.error(f"Ошибка получения узлов: {initial_nodes['error']}")
+            return False
+
+        # Инициализируем node_result с исходными данными
+        self.node_result = initial_nodes
+        self.save_node_result()
+
+        # Создаем копию для локальной работы, чтобы не перезаписывать node_result
+        current_nodes_state = initial_nodes.copy()
 
         while True:
             if self.max_iterations and self.current_iteration >= self.max_iterations:
                 logger.info(
-                    f"Достигнуто максимальное количество итераций ({self.max_iterations}). "
-                    "Обновление завершено успешно."
+                    f"Достигнуто максимальное количество итераций ({self.max_iterations})"
                 )
                 return True
 
             logger.info(f"Итерация {self.current_iteration + 1}")
 
-            logger.debug("Получение списка всех узлов")
-            all_nodes = self.get_all_nodes(max_retries=MAX_RETRIES_DEFAULT)
-            if "error" in all_nodes:
-                logger.error(f"Ошибка получения узлов: {all_nodes['error']}")
-                return False
-
-            logger.debug("Поиск серверов для обновления")
-            servers_to_update = self.get_retail_servers_to_update(all_nodes)
+            # Используем актуальное состояние узлов
+            servers_to_update = self.get_retail_servers_to_update(current_nodes_state)
 
             if not servers_to_update:
                 logger.info("Все серверы RETAIL уже обновлены до целевой версии")
@@ -1012,99 +1062,51 @@ class UnifiedServerUpdater:
             current_batch = servers_to_update[: self.batch_size]
             self.current_iteration += 1
 
-            logger.info(
-                f"Итерация {self.current_iteration}: обновляем {len(current_batch)} серверов: "
-                f"{[s['tp_index'] for s in current_batch]}"
-            )
+            logger.info(f"Обработка батча: {[s['tp_index'] for s in current_batch]}")
 
-            logger.debug("Создание файла с серверами для обновления")
+            # Создаем временный файл для текущего батча
             self.create_server_file(current_batch)
 
-            logger.info(f"Запуск обновления до версии {self.target_version}")
-            update_result = self.update_servers(version_sv=self.target_version)
+            # Получаем статус только для текущего батча (не перезаписываем основной словарь)
+            logger.debug("Получение статуса серверов перед обновлением")
+            batch_nodes = self.get_nodes_from_file()
+            self.save_status_lists()
 
-            if "error" in update_result:
-                logger.error(f"Ошибка запуска обновления: {update_result['error']}")
-                return False
-
-            while True:
-                logger.info(
-                    f"Ожидание {STATUS_CHECK_INTERVAL // 60} минут перед проверкой статуса..."
-                )
-                time.sleep(STATUS_CHECK_INTERVAL)
-
-                logger.debug("Проверка статуса обновления")
-                self.get_nodes_from_file()
-                self.save_status_lists(prefix=FILES["status_prefix"])
-
-                if self.check_file_exists(FILES["status_prefix"] + FILES["error_tp"]):
-                    error_servers = self.read_file_lines(
-                        FILES["status_prefix"] + FILES["error_tp"]
-                    )
-                    logger.error(
-                        f"Обнаружены ошибки обновления на серверах: {error_servers}"
-                    )
+            # Предварительный перезапуск служб
+            if PRE_UPDATE_RESTART:
+                if not self._perform_pre_restart():
                     return False
 
-                if self.check_file_exists(FILES["status_prefix"] + FILES["update_tp"]):
-                    update_servers = self.read_file_lines(
-                        FILES["status_prefix"] + FILES["update_tp"]
-                    )
-                    logger.info(f"Серверы все еще обновляются: {update_servers}")
-                    continue
+            # Запускаем обновление
+            logger.info(f"Запуск обновления до версии {self.target_version}")
+            update_result = self.update_servers(version_sv=self.target_version)
+            if "error" in update_result:
+                logger.error(f"Ошибка обновления: {update_result['error']}")
+                return False
 
-                if self.check_file_exists(FILES["status_prefix"] + FILES["ccm_tp"]):
-                    ccm_servers = self.read_file_lines(
-                        FILES["status_prefix"] + FILES["ccm_tp"]
-                    )
-                    logger.info(f"Перезапуск CCM на серверах: {ccm_servers}")
+            # Мониторим статус обновления
+            if not self._monitor_update_status(current_batch):
+                return False
 
-                    if not self.restart_service_with_plink(
-                        ccm_servers, FILES["ccm_restart_commands"]
-                    ):
-                        logger.error("Ошибка перезапуска CCM")
-                        return False
-                    continue
+            # Обновляем состояние только для успешно обновленных узлов
+            for server in current_batch:
+                ip = server["ip"]
+                if ip in current_nodes_state:
+                    current_nodes_state[ip]["cv"] = self.target_version
+                    self.updated_servers.add(ip)
+                    logger.debug(f"Обновлена версия для {ip} -> {self.target_version}")
 
-                if self.check_file_exists(FILES["status_prefix"] + FILES["unzip_tp"]):
-                    unzip_servers = self.read_file_lines(
-                        FILES["status_prefix"] + FILES["unzip_tp"]
-                    )
-                    logger.info(f"Перезапуск unzip на серверах: {unzip_servers}")
+            # Синхронизируем с основным словарем и сохраняем
+            self.node_result.update(current_nodes_state)
+            self.save_node_result()
 
-                    if not self.restart_service_with_plink(
-                        unzip_servers, FILES["unzip_restart_commands"]
-                    ):
-                        logger.error("Ошибка перезапуска unzip")
-                        return False
-                    continue
+            # Удаляем временный файл с серверами текущего батча
+            server_file = self.config_dir / FILES["server_list"]
+            if server_file.exists():
+                server_file.unlink()
+                logger.debug(f"Удален временный файл {server_file}")
 
-                if self.check_file_exists(FILES["status_prefix"] + FILES["work_tp"]):
-                    work_servers = self.read_file_lines(
-                        FILES["status_prefix"] + FILES["work_tp"]
-                    )
-                    logger.info(f"Серверы в работе: {work_servers}")
-
-                    servers_match, incorrect_versions = (
-                        self.compare_servers_and_versions(work_servers, current_batch)
-                    )
-
-                    if not servers_match:
-                        logger.error("Несоответствие серверов или версий")
-                        return False
-
-                    if not incorrect_versions:
-                        logger.info(f"Батч {self.current_iteration} успешно обновлен")
-                        for server in current_batch:
-                            self.updated_servers.add(server["ip"])
-                        break
-                    else:
-                        logger.error(
-                            f"Серверы с неправильными версиями: {incorrect_versions}"
-                        )
-                        return False
-                else:
-                    continue
+            # Продолжаем цикл для следующего батча
 
 
 # Пример использования
@@ -1115,17 +1117,6 @@ if __name__ == "__main__":
         # Создаем унифицированный обновлятель
         logger.debug("Создание экземпляра UnifiedServerUpdater")
         updater = UnifiedServerUpdater()
-
-        # Получить статус всех узлов
-        # logger.info("Получение статуса всех узлов")
-        # all_nodes = updater.get_nodes_from_file()
-        # all_nodes = updater.get_all_nodes()
-        # all_nodes_result = updater.save_node_result()
-        # all_nodes_save = updater.save_status_lists()
-        # if all_nodes:
-        #     logger.info("Все серверы успешно собраны!")
-        # else:
-        #     logger.error("Сбор завершился с ошибками")
 
         # Запускаем обновление
         logger.info("Запуск процесса обновления")
