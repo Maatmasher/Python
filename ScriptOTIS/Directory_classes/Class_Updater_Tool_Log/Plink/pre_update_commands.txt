@@ -1,4 +1,6 @@
 sudo su - << END_IN
+chown -R jboss:users /var/updates.rsync/
+cp -n /var/updates.rsync/retail_*.zip /var/lib/jboss/acm/updates/
 nohup systemctl restart --no-block SCM_SVC.service > /home/otis/logrestart.log 2>&1 &
 exit
 END_IN

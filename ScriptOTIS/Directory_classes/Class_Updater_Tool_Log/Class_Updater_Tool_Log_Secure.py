@@ -5,6 +5,8 @@ from typing import List, Dict, Optional, Set, Tuple, Union
 import logging
 import json
 import os
+import keyring
+from getpass import getpass
 
 # ==================== КОНФИГУРАЦИОННЫЕ ПАРАМЕТРЫ ====================
 # Основные настройки
@@ -15,20 +17,18 @@ JAR_NAME = "ConfiguratorCmdClient-1.5.1.jar"
 FILES_DIR = os.path.join(CURRENT_DIR, "Files")
 PLINK_DIR = os.path.join(CURRENT_DIR, "Plink")
 SSH_USER = "otis"
-SSH_PASSWORD = "MzL2qqOp"
+# SSH_PASSWORD = "MzL2qqOp"
 PLINK_PATH = os.path.join(PLINK_DIR, "plink.exe")
 
 # Настройки обновления
 TARGET_VERSION = "10.4.15.12"
-BATCH_SIZE = 5  # Сколько серверов за раз
+part_server_SIZE = 5  # Сколько серверов за раз
 MAX_ITERATIONS = None  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
 MAX_RETRIES_SINGLE = 1
 DEFAULT_NO_BACKUP = True  #
 DEFAULT_AUTO_RESTART = True  #
-PRE_UPDATE_WORK = (
-    True  # Флаг для предварительного перезапуска служб перед обновлением
-)
+PRE_UPDATE_WORK = True  # Флаг для предварительного перезапуска служб перед обновлением
 PRE_UPDATE_TIMEOUT = 60  #
 
 # Таймауты и интервалы
@@ -93,14 +93,15 @@ class UnifiedServerUpdater:
         config_dir: str = CONFIG_DIR,
         jar_name: str = JAR_NAME,
         target_version: str = TARGET_VERSION,
-        batch_size: int = BATCH_SIZE,
+        part_server_size: int = part_server_SIZE,
         max_iterations: Optional[int] = MAX_ITERATIONS,
+        service_name: str = "UnifiedServerUpdater",
     ):
         logger.debug("Инициализация UnifiedServerUpdater")
         logger.debug(
             f"Параметры: centrum_host={centrum_host}, config_dir={config_dir}, "
             f"jar_name={jar_name}, target_version={target_version}, "
-            f"batch_size={batch_size}, max_iterations={max_iterations}"
+            f"part_server_size={part_server_size}, max_iterations={max_iterations}"
         )
 
         # Параметры из ConfiguratorTool
@@ -118,15 +119,17 @@ class UnifiedServerUpdater:
 
         # Параметры из ServerUpdater
         self.target_version = target_version
-        self.batch_size = batch_size
+        self.part_server_size = part_server_size
         self.max_iterations = max_iterations
         self.current_iteration = 0
         self.updated_servers: Set[str] = set()
 
         # Параметры из ServiceRestarter
         self.user = SSH_USER
-        self.password = SSH_PASSWORD
         self.plink_path = Path(PLINK_PATH)
+        self.service_name = service_name
+        self.password = self._init_password()
+
         logging.debug(f"Конфигурация: plink_path={self.plink_path}, user={self.user}")
 
         if not self.jar_path.exists():
@@ -135,6 +138,22 @@ class UnifiedServerUpdater:
             raise FileNotFoundError(error_msg)
 
         logger.info("UnifiedServerUpdater успешно инициализирован")
+
+    def _init_password(self) -> str:
+        """Инициализирует пароль, проверяя keyring или запрашивая у пользователя"""
+        try:
+            password = keyring.get_password(self.service_name, self.user)
+            if password is None:
+                logger.warning(
+                    f"Пароль для пользователя {self.user} не найден в keyring"
+                )
+                password = getpass(f"Введите пароль для пользователя {self.user}: ")
+                keyring.set_password(self.service_name, self.user, password)
+                logger.info("Пароль успешно сохранен в keyring")
+            return password
+        except Exception as e:
+            logger.error(f"Ошибка при работе с keyring: {str(e)}")
+            raise RuntimeError("Не удалось инициализировать пароль") from e
 
     # ==================== Методы из ConfiguratorTool ====================
 
@@ -754,7 +773,7 @@ class UnifiedServerUpdater:
         logger.debug(f"Прочитано строк (без '0'): {len(valid_lines)}")
         return valid_lines
 
-    def restart_service_with_plink(self, servers: List[str], restart_file: str) -> bool:
+    def command_with_plink(self, servers: List[str], restart_file: str) -> bool:
         """Перезапускает службу на серверах используя PLINK"""
         logging.info(f"Начало обработки {len(servers)} серверов")
         try:
@@ -812,7 +831,7 @@ class UnifiedServerUpdater:
                     f"{self.user}@{server_ip}",
                     "-pw",
                     self.password,
-                    "-batch",
+                    "-part_server",
                     "-m",
                     str(command_filepath),
                 ]
@@ -867,7 +886,7 @@ class UnifiedServerUpdater:
 
         except Exception as e:
             logging.error(
-                f"Критическая ошибка в restart_service_with_plink: {str(e)}",
+                f"Критическая ошибка в command_with_plink: {str(e)}",
                 exc_info=True,
             )
             return False
@@ -942,30 +961,28 @@ class UnifiedServerUpdater:
         logger.info("Все серверы соответствуют ожидаемым и имеют правильные версии")
         return True, []
 
-    def _perform_pre_restart(self):
+    def _perform_pre_work(self):
         """Выполняет предварительный перезапуск служб"""
         logger.info("Выполнение предварительного перезапуска служб")
         work_servers = self.read_file_lines(FILES["work_tp"])
         if work_servers:
             logger.info(f"Перезапуск служб на серверах: {work_servers}")
-            if not self.restart_service_with_plink(
-                work_servers, FILES["pre_update_commands"]
-            ):
+            if not self.command_with_plink(work_servers, FILES["pre_update_commands"]):
                 logger.error("Ошибка предварительного перезапуска служб")
                 return False
         logger.info(f"Ожидание {PRE_UPDATE_TIMEOUT} секунд...")
         time.sleep(PRE_UPDATE_TIMEOUT)
         return True
 
-    def _monitor_update_status(self, current_batch: List[Dict]) -> bool:
-        """Мониторит статус обновления для текущего батча"""
+    def _monitor_update_status(self, current_part_server: List[Dict]) -> bool:
+        """Мониторит статус обновления для текущей итерации"""
         while True:
             logger.info(
                 f"Ожидание {STATUS_CHECK_INTERVAL // 60} минут перед проверкой..."
             )
             time.sleep(STATUS_CHECK_INTERVAL)
 
-            # Получаем статус только для текущего батча
+            # Получаем статус только для текущей итерации
             self.get_nodes_from_file()
             self.save_status_lists(prefix=FILES["status_prefix"])
 
@@ -974,7 +991,7 @@ class UnifiedServerUpdater:
                 return False
 
             # Проверяем статусы обновления
-            status_check = self._check_update_statuses(current_batch)
+            status_check = self._check_update_statuses(current_part_server)
             if status_check is not None:  # None означает продолжение ожидания
                 return status_check
 
@@ -988,7 +1005,7 @@ class UnifiedServerUpdater:
             return True
         return False
 
-    def _check_update_statuses(self, current_batch: List[Dict]) -> Optional[bool]:
+    def _check_update_statuses(self, current_part_server: List[Dict]) -> Optional[bool]:
         """Проверяет различные статусы обновления"""
         # Проверяем необходимость перезапуска служб
         if self._handle_service_restart(FILES["ccm_tp"], FILES["ccm_restart_commands"]):
@@ -1071,7 +1088,7 @@ class UnifiedServerUpdater:
                 FILES["status_prefix"] + FILES["work_tp"]
             )
             servers_match, incorrect_versions = self.compare_servers_and_versions(
-                work_servers, current_batch
+                work_servers, current_part_server
             )
             if servers_match and not incorrect_versions:
                 # Сбрасываем счетчики при успешном завершении
@@ -1090,13 +1107,13 @@ class UnifiedServerUpdater:
         if self.check_file_exists(FILES["status_prefix"] + status_file):
             servers = self.read_file_lines(FILES["status_prefix"] + status_file)
             logger.info(f"Перезапуск служб на серверах: {servers}")
-            if not self.restart_service_with_plink(servers, commands_file):
+            if not self.command_with_plink(servers, commands_file):
                 logger.error(f"Ошибка перезапуска служб ({status_file})")
                 return False
             return True
         return False
 
-    def update_servers_batch(self) -> bool:
+    def update_servers_part_server(self) -> bool:
         """Основной метод обновления серверов по частям с сохранением состояния"""
         logger.info("Начало пошагового обновления серверов")
 
@@ -1130,22 +1147,24 @@ class UnifiedServerUpdater:
                 logger.info("Все серверы RETAIL уже обновлены до целевой версии")
                 return True
 
-            current_batch = servers_to_update[: self.batch_size]
+            current_part_server = servers_to_update[: self.part_server_size]
             self.current_iteration += 1
 
-            logger.info(f"Обработка батча: {[s['tp_index'] for s in current_batch]}")
+            logger.info(
+                f"Обработка итерации: {[s['tp_index'] for s in current_part_server]}"
+            )
 
-            # Создаем временный файл для текущего батча
-            self.create_server_file(current_batch)
+            # Создаем временный файл для текущей итерации
+            self.create_server_file(current_part_server)
 
-            # Получаем статус только для текущего батча (не перезаписываем основной словарь)
+            # Получаем статус только для текущей итерации (не перезаписываем основной словарь)
             logger.debug("Получение статуса серверов перед обновлением")
-            batch_nodes = self.get_nodes_from_file()
+            part_server_nodes = self.get_nodes_from_file()
             self.save_status_lists()
 
             # Предварительный перезапуск служб
             if PRE_UPDATE_WORK:
-                if not self._perform_pre_restart():
+                if not self._perform_pre_work():
                     return False
 
             # Запускаем обновление
@@ -1156,11 +1175,11 @@ class UnifiedServerUpdater:
                 return False
 
             # Мониторим статус обновления
-            if not self._monitor_update_status(current_batch):
+            if not self._monitor_update_status(current_part_server):
                 return False
 
             # Обновляем состояние только для успешно обновленных узлов
-            for server in current_batch:
+            for server in current_part_server:
                 ip = server["ip"]
                 if ip in current_nodes_state:
                     current_nodes_state[ip]["cv"] = self.target_version
@@ -1171,13 +1190,13 @@ class UnifiedServerUpdater:
             self.node_result.update(current_nodes_state)
             self.save_node_result()
 
-            # Удаляем временный файл с серверами текущего батча
+            # Удаляем временный файл с серверами текущей итерации
             server_file = self.config_dir / FILES["server_list"]
             if server_file.exists():
                 server_file.unlink()
                 logger.debug(f"Удален временный файл {server_file}")
 
-            # Продолжаем цикл для следующего батча
+            # Продолжаем цикл для следующего итерации
 
 
 # Пример использования
@@ -1191,7 +1210,7 @@ if __name__ == "__main__":
 
         # Запускаем обновление
         logger.info("Запуск процесса обновления")
-        success = updater.update_servers_batch()
+        success = updater.update_servers_part_server()
 
         if success:
             logger.info("Все серверы успешно обновлены!")

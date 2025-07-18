@@ -1,3 +1,4 @@
 sudo su - << END_IN
-systemctl restart JBOSS_SVC.service
+nohup systemctl restart --no-block JBOSS_SVC.service > /home/otis/logrestart.log 2>&1 &
+exit
 END_IN
