@@ -23,19 +23,22 @@ PLINK_PATH = os.path.join(PLINK_DIR, "plink.exe")
 # Настройки обновления
 TARGET_VERSION = "10.4.15.12"
 part_server_SIZE = 5  # Сколько серверов за раз
-MAX_ITERATIONS = None  # Количество итераций. None для неограниченного количества
+MAX_ITERATIONS = 3  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
 MAX_RETRIES_SINGLE = 1
 DEFAULT_NO_BACKUP = True  #
 DEFAULT_AUTO_RESTART = True  #
-PRE_UPDATE_WORK = True  # Флаг для предварительного перезапуска служб перед обновлением
-PRE_UPDATE_TIMEOUT = 60  #
+PRE_UPDATE_WORK = True  # Флаг для предварительного скрипта перед обновлением
+POST_UPDATE_WORK = True  # Флаг для скрипта после обновления
+
 
 # Таймауты и интервалы
 WAIT_BETWEEN_RETRIES = 2  # секунды
 STATUS_CHECK_INTERVAL = 600  # 10 минут
 PING_TIMEOUT = 1000  # мс
 PLINK_TIMEOUT = 300  # секунды (5 минут)
+PRE_UPDATE_TIMEOUT = 60  # Максимальное время на выполнение скрипта перед обновлением
+POST_UPDATE_TIMEOUT = 60  # Максимальное время на выполнение скрипта после обновления
 
 # Имена файлов
 FILES = {
@@ -45,6 +48,7 @@ FILES = {
     "ccm_restart_commands": os.path.join(PLINK_DIR, "ccm_commands.txt"),
     "unzip_restart_commands": os.path.join(PLINK_DIR, "unzip_commands.txt"),
     "pre_update_commands": os.path.join(PLINK_DIR, "pre_update_commands.txt"),
+    "post_update_commands": os.path.join(PLINK_DIR, "post_update_commands.txt"),
     # Файлы статусов (с префиксом)
     "status_prefix": "server_",
     "work_tp": "work_tp.txt",
@@ -962,16 +966,29 @@ class UnifiedServerUpdater:
         return True, []
 
     def _perform_pre_work(self):
-        """Выполняет предварительный перезапуск служб"""
-        logger.info("Выполнение предварительного перезапуска служб")
+        """Выполняет предварительные работы с сервером перед обновлением"""
+        logger.info("Выполнение предварительных работ с сервером")
         work_servers = self.read_file_lines(FILES["work_tp"])
         if work_servers:
-            logger.info(f"Перезапуск служб на серверах: {work_servers}")
+            logger.info(f"Предварительные работы на серверах: {work_servers}")
             if not self.command_with_plink(work_servers, FILES["pre_update_commands"]):
-                logger.error("Ошибка предварительного перезапуска служб")
+                logger.error("Ошибка выполнения предварительных работ")
                 return False
         logger.info(f"Ожидание {PRE_UPDATE_TIMEOUT} секунд...")
         time.sleep(PRE_UPDATE_TIMEOUT)
+        return True
+
+    def _perform_post_work(self):
+        """Выполняет дополнительные работы с сервером после обновления"""
+        logger.info("Выполнение дополнительных работ с сервером после обновления")
+        work_servers = self.read_file_lines(FILES["work_tp"])
+        if work_servers:
+            logger.info(f"Дополнительные работы на серверах: {work_servers}")
+            if not self.command_with_plink(work_servers, FILES["post_update_commands"]):
+                logger.error("Ошибка выполнения дополнительных работ")
+                return False
+        logger.info(f"Ожидание {POST_UPDATE_TIMEOUT} секунд...")
+        time.sleep(POST_UPDATE_TIMEOUT)
         return True
 
     def _monitor_update_status(self, current_part_server: List[Dict]) -> bool:
@@ -1162,7 +1179,7 @@ class UnifiedServerUpdater:
             part_server_nodes = self.get_nodes_from_file()
             self.save_status_lists()
 
-            # Предварительный перезапуск служб
+            # Предварительные работы(например копирование файлов обновления)
             if PRE_UPDATE_WORK:
                 if not self._perform_pre_work():
                     return False
@@ -1189,6 +1206,11 @@ class UnifiedServerUpdater:
             # Синхронизируем с основным словарем и сохраняем
             self.node_result.update(current_nodes_state)
             self.save_node_result()
+
+            # Предварительные работы(например копирование файлов обновления)
+            if POST_UPDATE_WORK:
+                if not self._perform_post_work():
+                    return False
 
             # Удаляем временный файл с серверами текущей итерации
             server_file = self.config_dir / FILES["server_list"]
