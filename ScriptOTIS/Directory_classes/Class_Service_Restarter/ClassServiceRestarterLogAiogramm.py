@@ -20,16 +20,14 @@ PING_TIMEOUT = 1000  # мс
 PLINK_TIMEOUT = 300  # сек (5 мин)
 
 # --- Настройки Telegram-бота ---------------------------------------
-TG_BOT_TOKEN = (
-    "550546110:AAGmgVKJveoNUgZK34g4lEVe5ebRxbd73Sk"  # токен, выданный @BotFather
-)
+TG_BOT_TOKEN = ""  # токен, выданный @BotFather
 TG_DESTINATION_CHAT = -240451454  # ID чата (отрицательный для групп)
 TG_LOG_LEVEL = logging.INFO  # что отправлять в TG
 TG_MAX_MESSAGE_LEN = 4096  # лимит Telegram
 # ===================================================================
 
 # === Telegram-обработчик логов =====================================
-#from aiogram import Bot, exceptions  # импорт после конфигурации, чтобы не ломать pylint
+# from aiogram import Bot, exceptions  # импорт после конфигурации, чтобы не ломать pylint
 
 
 class TelegramLogHandler(logging.Handler):
