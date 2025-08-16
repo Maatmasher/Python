@@ -20,7 +20,7 @@ CASH_TYPES = {  # Типы кассовых терминалов
     "POS": "t2.cash_type = 'POS'",
     "SCO": "t2.cash_type = 'SCO'",
     "SCO_3": "t2.cash_type = 'SCO_3'",
-    "TOUCH": "t2.cash_type = 'TOUCH'" "",
+    "TOUCH_2": "t2.cash_type = 'TOUCH_2'" "",
 }
 
 OUTPUT_FILE = "cash_ip_all.json"  # Файл для сохранения результатов
@@ -57,7 +57,7 @@ def get_server_ips(main_servers):
 def get_cash_ips(cursor, cash_type):
     """Получаем IP-адреса кассовых терминалов указанного типа"""
     query = f"""
-        SELECT t1.cash_ip 
+        SELECT t1.cash_ip , t1.version
         FROM cash_cash as t1  
         JOIN cash_template as t2 ON t1.template_id=t2.id 
         WHERE t1.status = 'ACTIVE' 
@@ -66,7 +66,8 @@ def get_cash_ips(cursor, cash_type):
         ORDER BY t1.number
     """
     cursor.execute(query)
-    return [row[0] for row in cursor.fetchall()]
+    return cursor.fetchall()
+    # return [row[0] for row in cursor.fetchall()]
 
 
 def collect_cash_data(server_ips):
@@ -81,11 +82,12 @@ def collect_cash_data(server_ips):
                 with conn.cursor() as cursor:
                     for cash_type in CASH_TYPES:
                         ips = get_cash_ips(cursor, cash_type)
-                        for ip in ips:
+                        for ip, version in ips:
                             cash_dict[ip] = {
                                 "server_ip": server_ip,
                                 "type": cash_type,
                                 "status": "ACTIVE",
+                                "version": version,
                             }
             print(f" Данные с {server_ip} успешно собраны")
 

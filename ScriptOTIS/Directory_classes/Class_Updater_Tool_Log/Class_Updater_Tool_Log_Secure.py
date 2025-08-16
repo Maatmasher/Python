@@ -17,13 +17,12 @@ JAR_NAME = "ConfiguratorCmdClient-1.5.1.jar"
 FILES_DIR = os.path.join(CURRENT_DIR, "Files")
 PLINK_DIR = os.path.join(CURRENT_DIR, "Plink")
 SSH_USER = "otis"
-# SSH_PASSWORD = "MzL2qqOp"
 PLINK_PATH = os.path.join(PLINK_DIR, "plink.exe")
 
 # Настройки обновления
-TARGET_VERSION = "10.4.15.12"
+TARGET_VERSION = "10.4.15.15"
 part_server_SIZE = 5  # Сколько серверов за раз
-MAX_ITERATIONS = 3  # Количество итераций. None для неограниченного количества
+MAX_ITERATIONS = None  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
 MAX_RETRIES_SINGLE = 1
 DEFAULT_NO_BACKUP = True  #
@@ -34,8 +33,8 @@ POST_UPDATE_WORK = True  # Флаг для скрипта после обнов�
 
 # Таймауты и интервалы
 WAIT_BETWEEN_RETRIES = 2  # секунды
-STATUS_CHECK_INTERVAL = 600  # 10 минут
-PING_TIMEOUT = 1000  # мс
+STATUS_CHECK_INTERVAL = 300  # 10 минут
+PING_TIMEOUT = 2000  # мс
 PLINK_TIMEOUT = 300  # секунды (5 минут)
 PRE_UPDATE_TIMEOUT = 60  # Максимальное время на выполнение скрипта перед обновлением
 POST_UPDATE_TIMEOUT = 60  # Максимальное время на выполнение скрипта после обновления
@@ -89,7 +88,7 @@ logger.addHandler(file_handler)
 
 
 class UnifiedServerUpdater:
-    """Унифицированный класс для работы с JAR-инструментом конфигурации и пошагового обновления серверов"""
+    """Унифицированный класс для работы с JAR-инструментом конфигурации и пошаговым обновлением серверов"""
 
     def __init__(
         self,
@@ -147,17 +146,36 @@ class UnifiedServerUpdater:
         """Инициализирует пароль, проверяя keyring или запрашивая у пользователя"""
         try:
             password = keyring.get_password(self.service_name, self.user)
-            if password is None:
+            # Если пароль есть в keyring, проверяем его валидность
+            if password is not None:
+                if self._test_password(password):  # Нужно реализовать метод проверки
+                    return password
                 logger.warning(
-                    f"Пароль для пользователя {self.user} не найден в keyring"
+                    "Пароль из keyring не подходит. Требуется ввод нового пароля."
                 )
-                password = getpass(f"Введите пароль для пользователя {self.user}: ")
-                keyring.set_password(self.service_name, self.user, password)
-                logger.info("Пароль успешно сохранен в keyring")
+
+            # Если пароля нет или он невалидный — запрашиваем новый
+            password = getpass(f"Введите пароль для пользователя {self.user}: ")
+            keyring.set_password(self.service_name, self.user, password)
+            logger.info("Пароль успешно сохранён в keyring")
             return password
         except Exception as e:
             logger.error(f"Ошибка при работе с keyring: {str(e)}")
             raise RuntimeError("Не удалось инициализировать пароль") from e
+
+    def _test_password(self, password: str) -> bool:
+        """Проверяет, работает ли пароль (например, пробует подключиться)."""
+        try:
+            # Пример: пробуем выполнить простую команду через SSH
+            test_cmd = f"plink.exe -ssh {self.user}@{self.centrum_host} -pw {password} -batch echo OK"
+            subprocess.run(
+                test_cmd, check=True, shell=True, timeout=5, capture_output=True
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+        except Exception:
+            return False
 
     # ==================== Методы из ConfiguratorTool ====================
 
@@ -835,7 +853,7 @@ class UnifiedServerUpdater:
                     f"{self.user}@{server_ip}",
                     "-pw",
                     self.password,
-                    "-part_server",
+                    "-batch",
                     "-m",
                     str(command_filepath),
                 ]
