@@ -1,9 +1,13 @@
 import asyncio
 import csv
+import time
 from datetime import datetime
 import os
 import aiofiles
 import glob
+import paramiko
+from scp import SCPClient
+
 
 # ========= КОНФИГУРАЦИЯ =========
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,20 +18,26 @@ PING_RESULTS_FILE = os.path.join(
 )  # Файл с результатами ping
 COMMAND_FILE = os.path.join(CURRENT_DIR, "command_combined.txt")
 MAX_CONCURRENT_TASKS = 5  # Максимальное количество одновременных задач, не увлекайтесь
-PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_txt}"
 USER = "tc"
 PASSWORD = "JnbcHekbn123"
+# Укажите дату и время, когда нужно выполнить задачу (год, месяц, день, час, минута, секунда)
+target_time = datetime(2025, 8, 14, 2, 0, 0)  # Например, 31 декабря 2025 в 23:59
 
 # Параметры для загрузки файлов и выполнения команд
 UPLOAD_FILE = True  # Флаг включения/выключения загрузки файлов
 COMMAND_EXECUTE = True  # Флаг включения/выключения выполнения команд
-UPLOAD_FOLDER = "/tmp"  # Путь на хосте куда загружать файлы
-PSCP_CMD = "pscp.exe -pw {password} -scp -P 22 {local_file} {user}@{host}:{remote_path}"
+UPLOAD_FOLDER = "/home/tc/storage/crystal-cash/"  # Путь на хосте куда загружать файлы
 LOCAL_FILES = os.path.join(
     CURRENT_DIR, "upload_files"
 )  # Директория с файлами для загрузки
 # ================================
 
+def wait_until(target_time):
+    while True:
+        now = datetime.now()
+        if now >= target_time:
+            break
+        time.sleep(60)  # Проверяем каждую минуту
 
 def setup_files():
     """Создаем лог-файлы и CSV с заголовками"""
@@ -45,7 +55,6 @@ def setup_files():
         os.makedirs(LOCAL_FILES, exist_ok=True)
         print(f"Создана директория для файлов загрузки: {LOCAL_FILES}")
 
-
 async def log_message(message):
     """Запись сообщения в лог"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -54,14 +63,12 @@ async def log_message(message):
     async with aiofiles.open(LOG_FILE, "a", encoding="utf-8") as f:
         await f.write(log_entry)
 
-
 async def record_ping_result(ip, status):
     """Записываем результат ping в CSV файл"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(PING_RESULTS_FILE, "a", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([ip, status, timestamp])
-
 
 async def check_ping(host):
     """Асинхронная проверка ping с записью результата в CSV"""
@@ -91,7 +98,6 @@ async def check_ping(host):
         await record_ping_result(host, status)
         return False
 
-
 def get_files_to_upload():
     """Получаем список файлов из директории для загрузки"""
     if not os.path.exists(LOCAL_FILES):
@@ -105,9 +111,8 @@ def get_files_to_upload():
 
     return files_list
 
-
 async def run_pscp(host):
-    """Асинхронная загрузка файлов через pscp"""
+    """Асинхронная загрузка файлов через SCP с использованием Paramiko"""
     files_to_upload = get_files_to_upload()
 
     if not files_to_upload:
@@ -119,45 +124,45 @@ async def run_pscp(host):
 
     await log_message(f"{host}  Найдено файлов для загрузки: {total_files}")
 
-    for local_file in files_to_upload:
-        filename = os.path.basename(local_file)
-        remote_path = f"{UPLOAD_FOLDER}/{filename}"
-
-        cmd = PSCP_CMD.format(
-            password=PASSWORD,
-            local_file=local_file,
-            user=USER,
-            host=host,
-            remote_path=remote_path,
-        )
-
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        # Устанавливаем соединение один раз для всех файлов
+        ssh.connect(host, username=USER, password=PASSWORD)
+        
+        # Создаем SCP клиент
+        scp = SCPClient(ssh.get_transport())
+        
+        for local_file in files_to_upload:
+            filename = os.path.basename(local_file)
+            remote_path = f"{UPLOAD_FOLDER}/{filename}"
 
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-                stdout = stdout.decode().strip()
-                stderr = stderr.decode().strip()
+                # Используем run_in_executor для выполнения блокирующих операций SCP
+                await asyncio.get_event_loop().run_in_executor(
+                    None, 
+                    scp.put, 
+                    local_file, 
+                    remote_path
+                )
+                
+                await log_message(f"{host}  Файл {filename} успешно загружен")
+                success_count += 1
+                
+            except Exception as e:
+                await log_message(
+                    f"{host}  Ошибка загрузки {filename}: {str(e)}"
+                )
 
-                if proc.returncode == 0:
-                    await log_message(f"{host}  Файл {filename} успешно загружен")
-                    success_count += 1
-                else:
-                    await log_message(
-                        f"{host}  Ошибка загрузки {filename} (код {proc.returncode}): {stderr}"
-                    )
-
-            except asyncio.TimeoutError:
-                await log_message(f"{host}  Таймаут загрузки файла {filename}")
-                proc.kill()
-                await proc.communicate()
-
-        except Exception as e:
-            await log_message(
-                f"{host}  Критическая ошибка при загрузке {filename}: {str(e)}"
-            )
+    except Exception as e:
+        await log_message(f"{host}  Ошибка подключения: {str(e)}")
+        return False
+        
+    finally:
+        if 'scp' in locals():
+            scp.close()
+        ssh.close()
 
     if success_count == total_files:
         await log_message(
@@ -168,35 +173,60 @@ async def run_pscp(host):
         await log_message(f"{host}  Загружено файлов: {success_count}/{total_files}")
         return success_count > 0  # Возвращаем True если хотя бы один файл загружен
 
-
 async def run_plink(host):
-    """Асинхронное выполнение команды через plink"""
-    cmd = PLINK_CMD.format(
-        user=USER, password=PASSWORD, command_txt=COMMAND_FILE, host=host
-    )
+    """Асинхронное выполнение команды через SSH с использованием Paramiko"""
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=1800)
-            stdout = stdout.decode().strip()
-            stderr = stderr.decode().strip()
-
-            if proc.returncode == 0:
-                await log_message(f"{host}  Команды выполнены успешно\n{stdout}")
-            else:
-                await log_message(
-                    f"{host}  Ошибка выполнения команд (код {proc.returncode})\n{stderr}"
-                )
-        except asyncio.TimeoutError:
-            await log_message(f"{host}  Таймаут выполнения команд")
-            proc.kill()
-            await proc.communicate()
+        # Читаем команды из файла
+        with open(COMMAND_FILE, 'r') as f:
+            commands = f.read().splitlines()
+        
+        # Используем run_in_executor для блокирующих операций SSH
+            stdout, stderr, returncode = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: execute_ssh_commands(host, USER, PASSWORD, commands))
+        
+        if returncode == 0:
+            await log_message(f"{host}  Команды выполнены успешно\n{stdout}")
+        else:
+            await log_message(f"{host}  Ошибка выполнения команд (код {returncode})\n{stderr}")
+            
+    except asyncio.TimeoutError:
+        await log_message(f"{host}  Таймаут выполнения команд")
     except Exception as e:
         await log_message(f"{host}  Критическая ошибка при выполнении команд: {str(e)}")
 
+def execute_ssh_commands(host, username, password, commands):
+    """Синхронная функция для выполнения команд через SSH"""
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        ssh.connect(host, username=username, password=password, timeout=30)
+        
+        stdout_data = []
+        stderr_data = []
+        return_code = 0
+        
+        for cmd in commands:
+            if not cmd.strip() or cmd.strip().startswith('#'):
+                continue  # Пропускаем пустые строки и комментарии
+                
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            stdout.channel.recv_exit_status()  # Ждем завершения команды
+            
+            stdout_part = stdout.read().decode().strip()
+            stderr_part = stderr.read().decode().strip()
+            
+            stdout_data.append(stdout_part)
+            stderr_data.append(stderr_part)
+            
+            if stdout.channel.exit_status != 0:
+                return_code = stdout.channel.exit_status
+        
+        return '\n'.join(stdout_data), '\n'.join(stderr_data), return_code
+        
+    finally:
+        ssh.close()
 
 async def process_host(host, remaining_counter):
     """Обработка одного хоста"""
@@ -227,6 +257,7 @@ async def process_host(host, remaining_counter):
 
 
 async def main():
+    wait_until(target_time)
     setup_files()
 
     # Проверяем конфигурацию

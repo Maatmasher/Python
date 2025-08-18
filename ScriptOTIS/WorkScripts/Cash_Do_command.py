@@ -1,8 +1,6 @@
-import asyncio
-import csv
+import asyncio, csv, os, aiofiles
 from datetime import datetime
-import os
-import aiofiles
+
 
 # ========= КОНФИГУРАЦИЯ =========
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))

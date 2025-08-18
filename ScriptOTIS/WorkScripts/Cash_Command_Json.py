@@ -5,6 +5,9 @@ import csv
 from datetime import datetime
 import os
 import aiofiles
+import paramiko
+from concurrent.futures import ThreadPoolExecutor 
+
 
 # ========= КОНФИГУРАЦИЯ =============================================
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,8 +22,6 @@ COMMAND_TEMPLATE = "command_{type}.txt"  # Шаблон файла команд
 MAX_CONCURRENT_TASKS = (
     5  # Максимальное количество одновременных задач, меняем насколько не боимся)
 )
-PLINK_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch -m {command_file}"
-SSH_TEST_CMD = "plink.exe -ssh {user}@{host} -pw {password} -batch echo OK"
 USER = "tc"
 PASSWORD = "JnbcHekbn123"
 
@@ -29,7 +30,7 @@ PASSWORD = "JnbcHekbn123"
 ACTIONS_CONFIG = {
     "ENABLE_PING": True,  # Включить проверку ping
     "ENABLE_SSH_TEST": True,  # Включить проверку SSH-логина
-    "ENABLE_COMMAND": True,  # Включить выполнение команд через plink
+    "ENABLE_COMMAND": True,  # Включить выполнение команд 
     "ENABLE_CSV_LOGGING": True,  # Включить запись результатов в CSV
 }
 
@@ -38,6 +39,7 @@ EXECUTION_CONDITIONS = {
     "REQUIRE_PING_FOR_SSH": True,  # SSH тест только если ping успешен
     "REQUIRE_SSH_FOR_COMMAND": True,  # Команда только если SSH успешен
     "REQUIRE_PING_FOR_COMMAND": True,  # Команда только если ping успешен
+    "IGNORE_VERSIONS": ["10.4.17.8"],  # Версии для игнорирования (можно добавить несколько)
 }
 
 # Настройки логирования
@@ -46,6 +48,7 @@ LOGGING_CONFIG = {
     "LOG_SSH_RESULTS": True,  # Логировать результаты SSH тестов
     "LOG_COMMAND_RESULTS": True,  # Логировать результаты выполнения команд
     "LOG_SKIPPED_ACTIONS": True,  # Логировать пропущенные действия
+    "LOG_IGNORED_HOSTS": True,  # Логировать игнорируемые хосты
 }
 
 """ Команды: банальная копипаста
@@ -54,9 +57,10 @@ TYPE_COMMANDS = {
     "POS": "command_POS.txt",
     "SCO": "command_SCO.txt",
     "SCO_3": "command_SCO_3.txt",
-    "TOUCH": "command_TOUCH.txt",
+    "TOUCH_2": "command_TOUCH.txt",
 }
 # ====================================================================
+
 
 
 def setup_files():
@@ -74,12 +78,44 @@ def setup_files():
                     "Timestamp",
                     "Host",
                     "Device Type",
+                    "Version",
                     "Ping Status",
                     "SSH Login Status",
                     "Command Status",
+                    "Notes",
                 ]
             )
 
+def execute_ssh_commands_sync(host, username, password, commands, timeout=1800):
+    """Синхронное выполнение команд через SSH с использованием Paramiko"""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    stdout_data = ""
+    stderr_data = ""
+    returncode = 0
+    
+    try:
+        client.connect(host, username=username, password=password, timeout=10)
+        
+        for command in commands:
+            if not command.strip() or command.startswith('#'):
+                continue
+                
+            stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+            stdout_data += stdout.read().decode().strip() + "\n"
+            stderr_data += stderr.read().decode().strip() + "\n"
+            returncode = stdout.channel.recv_exit_status()
+            
+            if returncode != 0:
+                break
+                
+    except Exception as e:
+        stderr_data = str(e)
+        returncode = 1
+    finally:
+        client.close()
+        
+    return stdout_data, stderr_data, returncode
 
 async def log_execution(message):
     """Запись сообщения в лог выполнения"""
@@ -89,9 +125,8 @@ async def log_execution(message):
     async with aiofiles.open(LOG_FILE, "a", encoding="utf-8") as f:
         await f.write(log_entry)
 
-
 async def record_ping_result(
-    host, device_type, ping_status, ssh_status, command_status="N/A"
+    host, device_type, version, ping_status, ssh_status, command_status="N/A", notes=""
 ):
     """Запись результата ping, SSH и команды в CSV файл"""
     if not ACTIONS_CONFIG["ENABLE_CSV_LOGGING"]:
@@ -101,9 +136,17 @@ async def record_ping_result(
     with open(PING_CSV_FILE, "a", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(
-            [timestamp, host, device_type, ping_status, ssh_status, command_status]
+            [
+                timestamp,
+                host,
+                device_type,
+                version,
+                ping_status,
+                ssh_status,
+                command_status,
+                notes,
+            ]
         )
-
 
 async def check_ping(host, device_type):
     """Асинхронная проверка ping"""
@@ -137,9 +180,8 @@ async def check_ping(host, device_type):
             await log_execution(f"{host} ({device_type}) Ping error: {str(e)}")
         return False
 
-
 async def check_ssh_login(host, device_type, ping_success):
-    """Асинхронная проверка SSH-логина"""
+    """Асинхронная проверка SSH-логина с использованием Paramiko"""
     if not ACTIONS_CONFIG["ENABLE_SSH_TEST"]:
         if LOGGING_CONFIG["LOG_SKIPPED_ACTIONS"]:
             await log_execution(f"{host} ({device_type}) SSH тест отключен")
@@ -158,15 +200,20 @@ async def check_ssh_login(host, device_type, ping_success):
         return False
 
     try:
-        cmd = SSH_TEST_CMD.format(user=USER, password=PASSWORD, host=host)
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        def ssh_test_sync():
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(host, username=USER, password=PASSWORD, timeout=15)
+                return True
+            except Exception:
+                return False
+            finally:
+                client.close()
 
-        result = proc.returncode == 0 and "OK" in stdout.decode()
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(pool, ssh_test_sync)
 
         if LOGGING_CONFIG["LOG_SSH_RESULTS"]:
             status = "Success" if result else "Failed"
@@ -178,9 +225,8 @@ async def check_ssh_login(host, device_type, ping_success):
             await log_execution(f"{host} ({device_type}) SSH error: {str(e)}")
         return False
 
-
-async def run_plink(host, device_type, ping_success, ssh_success):
-    """Асинхронное выполнение команды через plink"""
+async def run_paramiko(host, device_type, ping_success, ssh_success):
+    """Асинхронное выполнение команды через SSH с использованием Paramiko"""
     if not ACTIONS_CONFIG["ENABLE_COMMAND"]:
         if LOGGING_CONFIG["LOG_SKIPPED_ACTIONS"]:
             await log_execution(f"{host} ({device_type}) Выполнение команды отключено")
@@ -219,40 +265,38 @@ async def run_plink(host, device_type, ping_success, ssh_success):
         )
         return False
 
-    cmd = PLINK_CMD.format(
-        user=USER, password=PASSWORD, command_file=command_file, host=host
-    )
-
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
+        # Читаем команды из файла
+        async with aiofiles.open(command_file, 'r') as f:
+            commands = (await f.read()).splitlines()
 
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=1800)
-            stdout = stdout.decode().strip()
-            stderr = stderr.decode().strip()
+        # Выполняем команды через SSH в отдельном потоке
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            stdout, stderr, returncode = await loop.run_in_executor(
+                pool,
+                execute_ssh_commands_sync,
+                host, USER, PASSWORD, commands
+            )
 
-            if proc.returncode == 0:
-                if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
-                    await log_execution(
-                        f"{host} ({device_type}) Команда выполнена успешно\n{stdout}"
-                    )
-                return True
-            else:
-                if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
-                    await log_execution(
-                        f"{host} ({device_type}) Ошибка выполнения команды (код {proc.returncode})\n{stderr}"
-                    )
-                return False
-        except asyncio.TimeoutError:
+        if returncode == 0:
             if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
                 await log_execution(
-                    f"{host} ({device_type}) Таймаут выполнения команды"
+                    f"{host} ({device_type}) Команда выполнена успешно\n{stdout}"
                 )
-            proc.kill()
-            await proc.communicate()
+            return True
+        else:
+            if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
+                await log_execution(
+                    f"{host} ({device_type}) Ошибка выполнения команды (код {returncode})\n{stderr}"
+                )
             return False
+    except asyncio.TimeoutError:
+        if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
+            await log_execution(
+                f"{host} ({device_type}) Таймаут выполнения команды"
+            )
+        return False
     except Exception as e:
         if LOGGING_CONFIG["LOG_COMMAND_RESULTS"]:
             await log_execution(
@@ -260,15 +304,33 @@ async def run_plink(host, device_type, ping_success, ssh_success):
             )
         return False
 
-
 async def process_host(host_info, remaining_counter):
     """Обработка одного хоста"""
     host = host_info["ip"]
     device_type = host_info["type"]
+    version = host_info.get("version", "N/A")
+
+    # Проверяем, нужно ли игнорировать этот хост
+    if version in EXECUTION_CONDITIONS.get("IGNORE_VERSIONS", []):
+        if LOGGING_CONFIG["LOG_IGNORED_HOSTS"]:
+            await log_execution(
+                f"{host} ({device_type}) Пропущен - версия {version} в списке игнорируемых"
+            )
+        await record_ping_result(
+            host,
+            device_type,
+            version,
+            "N/A",
+            "N/A",
+            "N/A",
+            f"Ignored due to version {version}",
+        )
+        remaining_counter["processed"] += 1
+        return
 
     remaining = remaining_counter["total"] - remaining_counter["processed"]
     await log_execution(
-        f"Обработка {host} ({device_type}) | Осталось хостов: {remaining}"
+        f"Обработка {host} ({device_type}) версия {version} | Осталось хостов: {remaining}"
     )
 
     # Проверка ping
@@ -288,7 +350,7 @@ async def process_host(host_info, remaining_counter):
     )
 
     # Выполнение команды
-    command_success = await run_plink(host, device_type, ping_success, ssh_success)
+    command_success = await run_paramiko(host, device_type, ping_success, ssh_success)
     command_status = (
         "Success"
         if command_success
@@ -296,10 +358,11 @@ async def process_host(host_info, remaining_counter):
     )
 
     # Запись результатов в CSV
-    await record_ping_result(host, device_type, ping_status, ssh_status, command_status)
+    await record_ping_result(
+        host, device_type, version, ping_status, ssh_status, command_status
+    )
 
     remaining_counter["processed"] += 1
-
 
 async def load_hosts():
     """Загрузка хостов из JSON файла"""
@@ -307,11 +370,13 @@ async def load_hosts():
         async with aiofiles.open(CASH_IP_FILE, "r") as f:
             content = await f.read()
             cash_data = json.loads(content)
-        return [{"ip": ip, "type": info["type"]} for ip, info in cash_data.items()]
+        return [
+            {"ip": ip, "type": info["type"], "version": info.get("version", "N/A")}
+            for ip, info in cash_data.items()
+        ]
     except Exception as e:
         await log_execution(f"Ошибка загрузки файла {CASH_IP_FILE}: {str(e)}")
         return []
-
 
 async def main():
     setup_files()
@@ -323,7 +388,15 @@ async def main():
 
     await log_execution("=== УСЛОВИЯ ВЫПОЛНЕНИЯ ===")
     for condition, enabled in EXECUTION_CONDITIONS.items():
-        await log_execution(f"{condition}: {'Включено' if enabled else 'Отключено'}")
+        if condition != "IGNORE_VERSIONS":  # Для списка версий специальный вывод
+            await log_execution(f"{condition}: {'Включено' if enabled else 'Отключено'}")
+    
+    # Вывод игнорируемых версий
+    ignore_versions = EXECUTION_CONDITIONS.get("IGNORE_VERSIONS", [])
+    if ignore_versions:
+        await log_execution(f"IGNORE_VERSIONS: {', '.join(ignore_versions)}")
+    else:
+        await log_execution("IGNORE_VERSIONS: Нет")
 
     # Загрузка списка касс из JSON
     hosts = await load_hosts()
@@ -351,6 +424,7 @@ async def main():
     await log_execution(
         f"Обработка завершена. Всего обработано: {counter['processed']}/{counter['total']}"
     )
+
 
 
 if __name__ == "__main__":

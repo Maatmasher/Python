@@ -1,14 +1,16 @@
 #!/usr/bin/env python
-# Version 1.0
 import psycopg2, time, os, paramiko, socket
 from datetime import datetime
 
 # Получаем путь к файлу cash_ip.txt в той же директории, что и скрипт
-ip_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cash_ip.txt")
+ip_file = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "cash_ip.txt"
+)
 
 # Читаем список хостов из файла
 try:
-    with open(ip_file, "r") as f:
+    with open(ip_file, 'r') as f:
         hosts_cash = [line.strip() for line in f if line.strip()]
 except FileNotFoundError:
     print(f"Файл {ip_file} не найден. Используем пустой список хостов.")
@@ -16,29 +18,26 @@ except FileNotFoundError:
 
 log_file = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "documents_check.csv",
+    "documents_check.csv", 
 )  # Лог файл делает там же откуда запускается скрипт
 
-
-def execute_ssh_command(
-    host, command="echo 'Hello World'", username="tc", password="JnbcHekbn123"
-):
+def execute_ssh_command(host, command="echo 'Hello World'", username="tc", password="JnbcHekbn123"):
     """Выполняет SSH команду на удаленном хосте, хардкод паролей это ужасно"""
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(host, username=username, password=password, timeout=10)
-
+        
         stdin, stdout, stderr = ssh.exec_command(command)
-        output = stdout.read().decode("utf-8").strip()
-        error = stderr.read().decode("utf-8").strip()
-
+        output = stdout.read().decode('utf-8').strip()
+        error = stderr.read().decode('utf-8').strip()
+        
         ssh.close()
-
+        
         if error:
             return False, error
         return True, output
-
+        
     except (paramiko.AuthenticationException, paramiko.SSHException, socket.error) as e:
         return False, str(e)
 
@@ -107,27 +106,23 @@ def check_documents():
             f.write(message)
 
         if exists and last_doc:
-            print(
-                f"Обнаружен документ без смены на {host_cash}. Выполняю дополнительные действия..."
-            )
-
+            print(f"Обнаружен документ без смены на {host_cash}. Выполняю дополнительные действия...")
+            
             # Выполняем SSH команду
             ssh_success, ssh_result = execute_ssh_command(
-                host_cash,
-                command="cash stop",  # Можно слать только команду, логин и пароль есть в функции
-                username="tc",
-                password="JnbcHekbn123",
+                host_cash, 
+                command="cash stop", # Можно слать только команду, логин и пароль есть в функции
+                username="tc",  
+                password="JnbcHekbn123"  
             )
-
+            
             # Логируем результат SSH
             ssh_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if ssh_success:
                 ssh_message = f"[{ssh_timestamp}] SSH команда выполнена успешно на {host_cash}: {ssh_result}\n"
             else:
-                ssh_message = (
-                    f"[{ssh_timestamp}] Ошибка SSH на {host_cash}: {ssh_result}\n"
-                )
-
+                ssh_message = f"[{ssh_timestamp}] Ошибка SSH на {host_cash}: {ssh_result}\n"
+            
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(ssh_message)
 
@@ -135,7 +130,7 @@ def check_documents():
                 with conn.cursor() as cursor:
                     # Вычисляем и записываем аннулированный чек
                     cursor.execute(
-                        """
+                    """
                     WITH active_shift AS (
                     SELECT id, cashnum, numshift
                     FROM ch_shift
@@ -188,20 +183,17 @@ def check_documents():
                 WHERE id = (SELECT id FROM last_unassigned_purchase)
                 RETURNING id,datecommit, fiscaldocnum, numberfield;
                 """
-                    )
+                )
                     anul_doc = cursor.fetchone()
-                    # assert anul_doc is not None
-                    if anul_doc is None:
-                        raise ValueError("Документ должен существовать!!!!")
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     message_anull = (
-                        f"[{timestamp}] Удалён документ без смены:  "
-                        f"{host_cash} ;"
-                        f"ID={anul_doc[0] if anul_doc[0] is not None else 'N/A'}; "  # собственно проверка полей
-                        f"Дата={anul_doc[1] if anul_doc[1] is not None else 'N/A'}; "  # если возвращается ничего или NULL
-                        f"Номер документа={anul_doc[2] if anul_doc[2] is not None else 'N/A'}; "  # то присваиваем N/A
-                        f"Номер чека ={anul_doc[3] if anul_doc[3] is not None else 'N/A'} ;\n"
-                    )
+                f"[{timestamp}] Удалён документ без смены:  "
+                f"{host_cash} ;"
+                f"ID={anul_doc[0] if anul_doc[0] is not None else 'N/A'}; "  # собственно проверка полей
+                f"Дата={anul_doc[1] if anul_doc[1] is not None else 'N/A'}; "  # если возвращается ничего или NULL
+                f"Номер документа={anul_doc[2] if anul_doc[2] is not None else 'N/A'}; "  # то присваиваем N/A
+                f"Номер чека ={anul_doc[3] if anul_doc[3] is not None else 'N/A'} ;\n"
+            )
                     print(anul_doc)
                 # Записываем в лог файл
             with open(log_file, "a", encoding="utf-8") as f:
@@ -209,18 +201,19 @@ def check_documents():
 
             # Выполняем SSH команду
             ssh_success, ssh_result = execute_ssh_command(
-                host_cash, command="cash start", username="tc", password="JnbcHekbn123"
+                host_cash, 
+                command="cash start",
+                username="tc",  
+                password="JnbcHekbn123"  
             )
-
+            
             # Логируем результат SSH
             ssh_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if ssh_success:
                 ssh_message = f"[{ssh_timestamp}] SSH команда выполнена успешно на {host_cash}: {ssh_result}\n"
             else:
-                ssh_message = (
-                    f"[{ssh_timestamp}] Ошибка SSH на {host_cash}: {ssh_result}\n"
-                )
-
+                ssh_message = f"[{ssh_timestamp}] Ошибка SSH на {host_cash}: {ssh_result}\n"
+            
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(ssh_message)
 
