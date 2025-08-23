@@ -10,7 +10,7 @@ from getpass import getpass
 
 # ==================== КОНФИГУРАЦИОННЫЕ ПАРАМЕТРЫ ====================
 # Основные настройки
-CENTRUM_HOST = "10.21.11.45"
+CENTRUM_HOST = "10.100.105.9"
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(CURRENT_DIR, "updaterJar")
 JAR_NAME = "ConfiguratorCmdClient-1.5.1.jar"
@@ -20,7 +20,7 @@ SSH_USER = "otis"
 PLINK_PATH = os.path.join(PLINK_DIR, "plink.exe")
 
 # Настройки обновления
-TARGET_VERSION = "10.4.15.15"
+TARGET_VERSION = "10.4.17.8"
 part_server_SIZE = 5  # Сколько серверов за раз
 MAX_ITERATIONS = None  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3

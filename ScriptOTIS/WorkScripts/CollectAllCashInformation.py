@@ -57,10 +57,11 @@ def get_server_ips(main_servers):
 def get_cash_ips(cursor, cash_type):
     """Получаем IP-адреса кассовых терминалов указанного типа"""
     query = f"""
-        SELECT t1.cash_ip , t1.version
+        SELECT t1.cash_ip , t1.version, t1.status
         FROM cash_cash as t1  
         JOIN cash_template as t2 ON t1.template_id=t2.id 
-        WHERE t1.status = 'ACTIVE' 
+        WHERE 
+          t1.status != 'DELETED' 
           AND t1.cash_ip IS NOT NULL 
           AND {CASH_TYPES[cash_type]}
         ORDER BY t1.number
@@ -82,14 +83,14 @@ def collect_cash_data(server_ips):
                 with conn.cursor() as cursor:
                     for cash_type in CASH_TYPES:
                         ips = get_cash_ips(cursor, cash_type)
-                        for ip, version in ips:
+                        for ip, version, status in ips:
                             cash_dict[ip] = {
                                 "server_ip": server_ip,
                                 "type": cash_type,
-                                "status": "ACTIVE",
+                                "status": status,
                                 "version": version,
                             }
-            print(f" Данные с {server_ip} успешно собраны")
+            print(f"Данные с {server_ip} успешно собраны")
 
         except OperationalError as e:
             print(f"Ошибка подключения к {server_ip}: {str(e)}", file=sys.stderr)
