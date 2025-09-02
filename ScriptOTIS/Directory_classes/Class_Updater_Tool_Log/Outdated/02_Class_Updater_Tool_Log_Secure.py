@@ -24,7 +24,7 @@ TARGET_VERSION = "10.4.17.8"
 part_server_SIZE = 5  # Сколько серверов за раз
 MAX_ITERATIONS = None  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
-MAX_RETRIES_SINGLE = 1
+MAX_RETRIES_SINGLE = 3
 DEFAULT_NO_BACKUP = True  #
 DEFAULT_AUTO_RESTART = True  #
 PRE_UPDATE_WORK = True  # Флаг для предварительного скрипта перед обновлением
@@ -32,7 +32,7 @@ POST_UPDATE_WORK = True  # Флаг для скрипта после обнов�
 
 
 # Таймауты и интервалы
-WAIT_BETWEEN_RETRIES = 2  # секунды
+WAIT_BETWEEN_RETRIES = 3  # секунды
 STATUS_CHECK_INTERVAL = 300  # 10 минут
 PING_TIMEOUT = 2000  # мс
 PLINK_TIMEOUT = 300  # секунды (5 минут)
@@ -43,6 +43,7 @@ POST_UPDATE_TIMEOUT = 60  # Максимальное время на выпол�
 FILES = {
     "server_list": "server.txt",
     "server_cash_list": "server_cash.txt",
+    "node_list": os.path.join(FILES_DIR, "node_list.txt"),
     "node_result": os.path.join(FILES_DIR, "node_result.json"),
     "ccm_restart_commands": os.path.join(PLINK_DIR, "ccm_commands.txt"),
     "unzip_restart_commands": os.path.join(PLINK_DIR, "unzip_commands.txt"),
@@ -605,9 +606,87 @@ class UnifiedServerUpdater:
     def get_all_nodes(
         self, max_retries: int = MAX_RETRIES_DEFAULT
     ) -> Dict[str, Dict[str, Optional[str]]]:
-        """Получить состояние всех узлов с Centrum"""
-        logger.info("Получение состояния всех узлов с Centrum")
-        return self._execute_command(["-ch", self.centrum_host, "--all"], max_retries)
+        """Получить состояние всех узлов с Centrum по частям из файла node_list.txt"""
+        logger.info("Получение состояния всех узлов с Centrum из файла node_list.txt")
+
+        # Читаем список всех узлов из файла
+        node_list_path = Path(FILES_DIR) / "node_list.txt"
+        if not node_list_path.exists():
+            logger.error(f"Файл node_list.txt не найден: {node_list_path}")
+            return {
+                "error": {"message": f"Файл node_list.txt не найден: {node_list_path}"}
+            }
+
+        # Читаем все номера серверов
+        with open(node_list_path, "r", encoding="utf-8") as f:
+            all_nodes = [line.strip() for line in f if line.strip()]
+
+        if not all_nodes:
+            logger.warning("Файл node_list.txt пуст")
+            return {}
+
+        logger.info(f"Найдено {len(all_nodes)} узлов в файле node_list.txt")
+
+        # Разбиваем на группы по 10 серверов
+        all_results: Dict[str, Dict[str, Optional[str]]] = {}
+        chunk_size = 10
+
+        for i in range(0, len(all_nodes), chunk_size):
+            chunk = all_nodes[i : i + chunk_size]
+            logger.info(
+                f"Обработка группы {i//chunk_size + 1}/{(len(all_nodes)-1)//chunk_size + 1}: {chunk}"
+            )
+
+            # Записываем текущую группу в server.txt
+            server_list_path = self.config_dir / FILES["server_list"]
+            with open(server_list_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(chunk))
+
+            # Получаем состояние для текущей группы
+            for _ in range(max_retries):
+                chunk_result = self.get_nodes_from_file()
+
+                # Проверяем на ошибки
+                if "error" in chunk_result:
+                    logger.error(
+                        f"Ошибка при получении состояния для группы {chunk}: {chunk_result['error']}"
+                    )
+                    # Продолжаем с следующей группой, но записываем ошибку
+                    for node in chunk:
+                        all_results[node] = {
+                            "tp": node,
+                            "status": "ERROR",
+                            "message": f"Ошибка получения состояния: {chunk_result['error'].get('message', 'Unknown error')}",
+                            "type": None,
+                            "cv": None,
+                            "pv": None,
+                            "online": None,
+                            "ip": None,
+                            "ut": None,
+                            "local patches": None,
+                        }
+                else:
+                    # Добавляем результаты текущей группы
+                    all_results.update(chunk_result)
+
+            # Пауза 10 секунд между группами
+            if i + chunk_size < len(all_nodes):  # Не ждем после последней группы
+                logger.info("Ожидание 10 секунд перед следующей группой...")
+                time.sleep(3)
+
+        all_results = {
+            ip: node_data
+            for ip, node_data in all_results.items()
+            if node_data.get("type") is not None
+        }
+
+        logger.info(
+            f"Все группы обработаны. Всего получено состояний: {len(all_results)}"
+        )
+
+        # Сохраняем объединенный результат
+        self.node_result = all_results
+        return all_results
 
     def get_nodes_from_file(
         self, filename: Union[Path, None] = None
@@ -1251,11 +1330,15 @@ if __name__ == "__main__":
         # Запускаем обновление
         logger.info("Запуск процесса обновления")
         success = updater.update_servers_part_server()
+        # Запускаем сбор информации из файла
+        # logger.info("Запуск сбора информации из файла")
+        # success = updater.get_nodes_from_file()
+        # updater.save_node_result()
 
         if success:
-            logger.info("Все серверы успешно обновлены!")
+            logger.info("Работа скрипта успешна завершена")
         else:
-            logger.error("Обновление завершилось с ошибками")
+            logger.error("Работа скрипта завершилась с ошибками")
 
     except Exception as e:
         logger.critical(f"Критическая ошибка: {str(e)}", exc_info=True)
