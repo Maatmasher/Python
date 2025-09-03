@@ -13,7 +13,7 @@ from psycopg2 import sql
 
 # ==================== КОНФИГУРАЦИОННЫЕ ПАРАМЕТРЫ ====================
 # Основные настройки
-CENTRUM_HOST = "10.100.105.9"
+CENTRUM_HOST = "10.21.11.45"
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(CURRENT_DIR, "updaterJar")
 JAR_NAME = "ConfiguratorCmdClient-1.5.1.jar"
@@ -52,7 +52,6 @@ POST_UPDATE_TIMEOUT = 60  # Максимальное время на выпол�
 # Имена файлов
 FILES = {
     "server_list": "server.txt",
-    "server_cash_list": "server_cash.txt",
     "node_list": os.path.join(FILES_DIR, "node_list.txt"),
     "node_result": os.path.join(FILES_DIR, "node_result.json"),
     "ccm_restart_commands": os.path.join(PLINK_DIR, "ccm_commands.txt"),
@@ -896,44 +895,6 @@ class UnifiedServerUpdater:
 
         return self._execute_command(args, MAX_RETRIES_SINGLE)
 
-    def update_cash_devices(
-        self,
-        cash_type: str,
-        version: str = None,
-        filename: Union[Path, None] = None,
-        no_backup: bool = DEFAULT_NO_BACKUP,
-        auto_restart: bool = DEFAULT_AUTO_RESTART,
-    ) -> Dict[str, Dict[str, Optional[str]]]:
-        """Запустить обновление касс по типу"""
-        if version is None:
-            version = self.target_version
-        if filename is None:
-            filename = Path(FILES["server_cash_list"])
-        filepath = self.config_dir / filename
-
-        logger.info(
-            f"Запуск обновления касс типа {cash_type} из файла {filepath} до версии {version}"
-        )
-
-        args = [
-            "-ch",
-            self.centrum_host,
-            "-f",
-            str(filepath),
-            "-sv",
-            version,
-            "-cv",
-            f"{cash_type}:{version}",
-        ]
-        if no_backup:
-            args.append("-nb")
-            logger.debug("Используется флаг no_backup (-nb)")
-        if auto_restart:
-            args.append("-ar")
-            logger.debug("Используется флаг auto_restart (-ar)")
-
-        return self._execute_command(args, MAX_RETRIES_SINGLE)
-
     def save_node_result(self, filename: Union[Path, None] = None):
         """Сохранить результат в файл"""
         if filename is None:
@@ -1501,11 +1462,6 @@ if __name__ == "__main__":
         # Запускаем обновление
         logger.info("Запуск процесса обновления")
         success = updater.update_servers_part_server()
-        # Запускаем сбор информации из файла
-        # logger.info("Запуск сбора информации из файла")
-        # success = updater.get_nodes_from_file()
-        # updater.save_node_result()
-
         if success:
             logger.info("Работа скрипта успешна завершена")
         else:
