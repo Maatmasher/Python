@@ -68,7 +68,6 @@ def get_cash_ips(cursor, cash_type):
     """
     cursor.execute(query)
     return cursor.fetchall()
-    # return [row[0] for row in cursor.fetchall()]
 
 
 def collect_cash_data(server_ips):

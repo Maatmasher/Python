@@ -30,7 +30,7 @@ DB_TABLE = "tpl_muk"  # Название таблицы с информацие�
 DB_SERVICE_NAME = "rn-otis-tools"  # Имя сервиса для keyring
 
 # Настройки обновления
-TARGET_VERSION = "10.4.17.15"
+TARGET_VERSION = "10.4.17.17"
 part_server_SIZE = 2  # Сколько серверов за раз
 MAX_ITERATIONS = 1  # Количество итераций. None для неограниченного количества
 MAX_RETRIES_DEFAULT = 3
@@ -72,7 +72,7 @@ FILES = {
 
 # Настройка логирования
 log_format = "%(asctime)s - %(levelname)s - %(message)s"
-log_level = logging.INFO
+log_level = logging.DEBUG
 
 # Создаем логгер
 logger = logging.getLogger(__name__)
