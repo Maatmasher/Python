@@ -1,0 +1,10 @@
+{
+    "centrum_host": "10.21.11.45",
+    "target_version": "10.4.17.15",
+    "part_server_size": 2,
+    "db_host": "10.21.11.201",
+    "files": {
+        "node_list": "Files/custom_node_list.txt",
+        "pre_update_commands": "Plink/custom_pre_commands.txt" 
+    }
+}

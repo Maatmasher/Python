@@ -2,6 +2,8 @@ import paramiko
 import time
 import os
 from datetime import datetime
+import keyring
+from getpass import getpass
 
 # ========= КОНФИГУРАЦИЯ =========
 
@@ -13,9 +15,9 @@ SERVERS_FILE = os.path.join(
 )  # Файл со списком серверов (IP адреса)
 LOG_FILE = os.path.join(CURRENT_DIR, "commands.log")  # Файл логов
 
-# Параметры подключения
-USERNAME = "otis"
-PASSWORD = "MzL2qqOp"
+# Параметры подключения (без хардкода паролей)
+USERNAME = "otis"  # Имя пользователя
+SERVICE_NAME = "ssh_automation"  # Имя сервиса для keyring
 SUDO_PASSWORD = None  # Если пароль не нужен, оставляем None
 
 # Параметры обработки серверов
@@ -24,6 +26,64 @@ PAUSE_COMMAND = 30  # Пауза в секундах после обработк
 TIMEOUT = 300  # Таймаут выполнения команд в секундах
 
 # ================================
+
+
+def get_password_from_keyring(username: str, service_name: str = SERVICE_NAME) -> str:
+    """
+    Получает пароль из keyring или запрашивает у пользователя и сохраняет
+    """
+    try:
+        # Пытаемся получить пароль из keyring
+        password = keyring.get_password(service_name, username)
+        
+        if password is not None:
+            # Проверяем валидность пароля
+            if test_password_validity(username, password):
+                print(f"Пароль найден в keyring и валиден")
+                return password
+            else:
+                print("Пароль из keyring недействителен, запрашиваем новый...")
+                keyring.delete_password(service_name, username)  # Удаляем неверный пароль
+        
+        # Запрашиваем пароль у пользователя
+        password = getpass(f"Введите пароль для пользователя {username}: ")
+        
+        # Проверяем валидность введенного пароля
+        if not test_password_validity(username, password):
+            raise ValueError("Введенный пароль недействителен")
+        
+        # Сохраняем пароль в keyring
+        keyring.set_password(service_name, username, password)
+        print("Пароль успешно сохранён в keyring")
+        return password
+        
+    except Exception as e:
+        print(f"Ошибка при работе с keyring: {e}")
+        # Запрашиваем пароль без сохранения в случае ошибки keyring
+        password = getpass(f"Введите пароль для пользователя {username} (keyring недоступен): ")
+        if not test_password_validity(username, password):
+            raise ValueError("Введенный пароль недействителен")
+        return password
+
+
+def test_password_validity(username: str, password: str) -> bool:
+    """
+    Тестирует валидность пароля подключения к первому серверу
+    """
+    servers = read_servers_from_file(SERVERS_FILE)
+    if not servers:
+        return True  # Если нет серверов для проверки, считаем пароль валидным
+    
+    test_host = servers[0]  # Проверяем на первом сервере
+    
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(test_host, username=username, password=password, timeout=10)
+        ssh.close()
+        return True
+    except:
+        return False
 
 
 def read_commands_from_file(file_path):
@@ -53,7 +113,7 @@ def read_servers_from_file(file_path):
         return []
 
 
-def _execute_shell_comands(
+def _execute_shell_commands(
     host, username, password, commands, sudo_password=None, timeout=300
 ):
     """Выполняет команды с sudo/su через SSH"""
@@ -150,6 +210,9 @@ def log_result(host, commands, output):
 
 def process_servers():
     """Обрабатывает все серверы из файла с учетом настроек паузы"""
+    # Получаем пароль безопасным способом
+    PASSWORD = get_password_from_keyring(USERNAME, SERVICE_NAME)
+    
     # Читаем список серверов и команд
     servers = read_servers_from_file(SERVERS_FILE)
     commands = read_commands_from_file(COMMANDS_FILE)
@@ -175,10 +238,10 @@ def process_servers():
         print(f"Обрабатывается сервер {i}/{total_servers}: {server}")
 
         try:
-            _execute_shell_comands(
+            _execute_shell_commands(
                 host=server,
                 username=USERNAME,
-                password=PASSWORD,
+                password=PASSWORD,  # Используем безопасно полученный пароль
                 commands=commands,
                 sudo_password=SUDO_PASSWORD,
                 timeout=TIMEOUT,
@@ -228,4 +291,3 @@ if __name__ == "__main__":
         print("\nОбработка прервана пользователем")
     except Exception as e:
         print(f"Критическая ошибка: {e}")
- 

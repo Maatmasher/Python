@@ -1,0 +1,3 @@
+sudo su - << END_IN
+rm -fR /var/lib/jboss/acm/updates/*
+END_IN

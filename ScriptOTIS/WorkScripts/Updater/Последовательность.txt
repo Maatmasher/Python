@@ -1,0 +1,63 @@
+updater.update_servers_part_server() - главный метод обновления
+
+self.get_all_nodes(max_retries=MAX_RETRIES_DEFAULT) - получение всех узлов
+
+→ self._get_nodes_from_database() (если нет node_list.txt)
+
+→ → self._init_db_password() - инициализация пароля БД
+
+→ → psycopg2.connect() - подключение к PostgreSQL
+
+→ → self._convert_db_rows_to_nodes_format() - конвертация данных
+
+self.save_node_result() - сохранение начального состояния
+
+Цикл итераций обновления:
+
+self.get_retail_servers_to_update() - поиск RETAIL серверов для обновления
+
+→ self.extract_tp_index() - извлечение индексов
+
+self.create_server_file(current_part_server) - создание server.txt
+
+self.get_nodes_from_file() - получение статуса серверов
+
+→ self._execute_command() - выполнение JAR команды
+
+→ → self._parse_output() - парсинг вывода
+
+→ → self._categorize_nodes() - категоризация по статусам
+
+self.save_status_lists() - сохранение статусов
+
+Предварительные работы (если включены):
+
+→ self._perform_pre_work()
+
+→ → self.read_file_lines() + self.command_with_plink()
+
+self.update_servers() - запуск обновления
+
+→ self._execute_command() с параметрами обновления
+
+self._monitor_update_status() - мониторинг статуса
+
+→ Цикл проверок с паузами time.sleep(status_check_interval)
+
+→ self.get_nodes_from_file() - периодическая проверка статуса
+
+→ self._check_errors() - проверка ошибок
+
+→ self._check_update_statuses() - анализ различных статусов
+
+→ self._handle_service_restart() - перезапуск служб при необходимости
+
+Обновление состояния успешно обновленных узлов
+
+Пост-обработка (если включена):
+
+→ self._perform_post_work()
+
+Удаление временного файла server.txt
+
+Повтор цикла для следующей партии серверов

@@ -1,0 +1,54 @@
+[
+    {
+        "command_id": 0,
+        "command_input_list": [
+            {
+                "param_id": 291,
+                "param_type": 0,
+                "param_value": "4"
+            },
+            {
+                "param_id": 1,
+                "param_type": 1,
+                "param_value": "%device_ip%"
+            },
+            {
+                "param_id": 2,
+                "param_type": 1,
+                "param_value": "1111"
+            },
+            {
+                "param_id": 3,
+                "param_type": 1,
+                "param_value": "1234"
+            },
+            {
+                "param_id": 5,
+                "param_type": 0,
+                "param_value": "1"
+            }
+        ],
+        "command_output_list": []
+    },
+    {
+        "command_id": 55,
+        "command_input_list": [
+            {
+                "param_id": 182,
+                "param_type": 0,
+                "param_value": ""
+            },
+            {
+                "param_id": 183,
+                "param_type": 0,
+                "param_value": "%plu_number%"
+            }
+        ],
+        "command_output_list": []
+    },
+    {
+        "command_id": 142,
+        "command_input_list": [],
+        "command_output_list": []
+    }
+]

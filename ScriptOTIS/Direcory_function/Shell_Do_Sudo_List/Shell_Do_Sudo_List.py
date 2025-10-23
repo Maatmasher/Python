@@ -1,4 +1,4 @@
-import paramiko, sys, re, socket
+import paramiko, re, socket
 import time
 import os
 from datetime import datetime
@@ -14,12 +14,12 @@ END_CMD = "echo 'all command done'"
 
 # Параметры подключения
 USERNAME = "otis"
-PASSWORD = "MzL2qqOp"
+PASSWORD = "some_uber_ultra_pass"
 
 # Параметры обработки серверов
 COUNT_SERVER = 5
-PAUSE_COMMAND = 1800
-TIMEOUT = 1800
+PAUSE_COMMAND = 450
+TIMEOUT = 450
 
 # ================================
 
@@ -86,7 +86,7 @@ def _execute_ssh_commands_generator_with_sudo(
         # Очищаем начальный вывод
         if shell.recv_ready():
             initial_output = shell.recv(4096).decode()
-            #print(f"Начальный вывод: {clean_ansi_escape(initial_output)}")
+            # print(f"Начальный вывод: {clean_ansi_escape(initial_output)}")
 
         # Выполняем sudo su -
         print("Выполняем sudo su -")
