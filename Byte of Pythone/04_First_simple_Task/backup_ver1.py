@@ -4,7 +4,7 @@ import os
 import time
 # 1. Файлы и каталоги, которые необходимо скопировать, собираются в список.
 if os.name == 'nt':
-    source = ['C:\\Users\Coldfear\Documents\\"SQUARE ENIX"', 'C:\\Users\Coldfear\Documents\py']
+    source = ['C:\\Users\\Coldfear\\Documents\\"SQUARE ENIX"', 'C:\\Users\\Coldfear\\Documents\\py']
 elif os.name == 'posix':
     source = ['"/home/maatmasher/Downloads/Telegram Desktop/"', '/home/maatmasher/Documents/py/']
 else:
